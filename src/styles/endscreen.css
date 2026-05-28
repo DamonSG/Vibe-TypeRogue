@@ -1,0 +1,133 @@
+.end-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(20, 10, 28, 0.95) 0%,
+    rgba(7, 5, 13, 1) 100%
+  );
+  pointer-events: auto;
+  z-index: 60;
+  gap: 24px;
+  opacity: 0;
+  animation: modal-in 600ms ease-out forwards;
+}
+
+.end-screen h1 {
+  font-family: var(--font-display);
+  font-size: 84px;
+  letter-spacing: 8px;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 24px currentColor,
+    0 6px 0 rgba(0, 0, 0, 0.6);
+}
+
+.end-screen.victory h1 {
+  color: var(--accent);
+}
+
+.end-screen.defeat h1 {
+  color: var(--danger);
+}
+
+.end-screen .rank-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  letter-spacing: 4px;
+  color: var(--ink);
+  text-transform: uppercase;
+  font-style: italic;
+  margin-top: -12px;
+}
+
+.end-screen .build-id {
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px 48px;
+  margin-top: 16px;
+  padding: 24px 36px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(244, 236, 216, 0.25);
+  border-radius: 4px;
+  min-width: 460px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+
+.stat-row .stat-label {
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+.stat-row .stat-value {
+  color: var(--accent);
+  font-weight: bold;
+  font-family: var(--font-display);
+  font-size: 18px;
+}
+
+.stat-row .stat-value.good {
+  color: var(--success);
+}
+.stat-row .stat-value.bad {
+  color: var(--danger);
+}
+
+.share-line {
+  font-style: italic;
+  color: var(--ink);
+  font-size: 16px;
+  max-width: 560px;
+  text-align: center;
+  border-top: 1px solid rgba(244, 236, 216, 0.18);
+  border-bottom: 1px solid rgba(244, 236, 216, 0.18);
+  padding: 12px 24px;
+  margin-top: 6px;
+}
+
+.end-screen .actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.end-screen button {
+  background: rgba(28, 18, 8, 0.85);
+  color: var(--accent);
+  border: 2px solid var(--accent);
+  padding: 14px 32px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform 140ms,
+    background 140ms,
+    box-shadow 140ms;
+}
+.end-screen button:hover {
+  transform: translateY(-2px);
+  background: rgba(60, 40, 14, 0.9);
+  box-shadow: 0 6px 16px rgba(233, 196, 106, 0.35);
+}

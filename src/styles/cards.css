@@ -1,0 +1,298 @@
+/* Enemy word card */
+.word-card {
+  position: absolute;
+  background: rgba(7, 5, 13, 0.82);
+  border: 1px solid rgba(244, 236, 216, 0.35);
+  border-radius: 4px;
+  padding: 8px 14px 10px;
+  min-width: 80px;
+  text-align: center;
+  z-index: 15;
+  transition:
+    border-color 160ms,
+    background 160ms,
+    opacity 200ms,
+    transform 60ms;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.6),
+    inset 0 0 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  font-family: var(--font-game);
+}
+
+/* Static fallback transforms — the per-frame JS sets the same values, but
+   when an animation runs we still need a sensible base for non-animated frames. */
+.word-card.anchor-top {
+  transform: translate(-50%, -100%);
+}
+.word-card.anchor-bottom {
+  transform: translate(-50%, 0);
+}
+
+.word-card.targeted {
+  border-color: var(--accent);
+  background: rgba(28, 18, 8, 0.92);
+  box-shadow:
+    0 6px 18px rgba(233, 196, 106, 0.35),
+    inset 0 0 8px rgba(233, 196, 106, 0.18);
+}
+
+/* Death animation — anchor-aware so the card always animates outward from
+   the enemy (top-anchored shatters upward, bottom-anchored shatters downward). */
+.word-card.anchor-top.dying {
+  animation: card-shatter-top 320ms ease-in forwards;
+}
+.word-card.anchor-bottom.dying {
+  animation: card-shatter-bottom 320ms ease-in forwards;
+}
+@keyframes card-shatter-top {
+  0% {
+    transform: translate(-50%, -100%) scale(1);
+    opacity: 1;
+  }
+  40% {
+    transform: translate(-50%, -110%) scale(1.18);
+    opacity: 1;
+    filter: brightness(2.2);
+  }
+  100% {
+    transform: translate(-50%, -130%) scale(0.4);
+    opacity: 0;
+    filter: brightness(0.4);
+  }
+}
+@keyframes card-shatter-bottom {
+  0% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+  }
+  40% {
+    transform: translate(-50%, 10%) scale(1.18);
+    opacity: 1;
+    filter: brightness(2.2);
+  }
+  100% {
+    transform: translate(-50%, 30%) scale(0.4);
+    opacity: 0;
+    filter: brightness(0.4);
+  }
+}
+
+.word-card.anchor-top.mistake-flash {
+  animation: card-mistake-top 280ms ease-out;
+}
+.word-card.anchor-bottom.mistake-flash {
+  animation: card-mistake-bottom 280ms ease-out;
+}
+@keyframes card-mistake-top {
+  0%,
+  100% {
+    border-color: rgba(244, 236, 216, 0.35);
+    background: rgba(7, 5, 13, 0.82);
+  }
+  40% {
+    border-color: var(--danger);
+    background: rgba(80, 16, 16, 0.92);
+    transform: translate(-50%, -100%) translateX(3px);
+  }
+  60% {
+    transform: translate(-50%, -100%) translateX(-3px);
+  }
+}
+@keyframes card-mistake-bottom {
+  0%,
+  100% {
+    border-color: rgba(244, 236, 216, 0.35);
+    background: rgba(7, 5, 13, 0.82);
+  }
+  40% {
+    border-color: var(--danger);
+    background: rgba(80, 16, 16, 0.92);
+    transform: translate(-50%, 0) translateX(3px);
+  }
+  60% {
+    transform: translate(-50%, 0) translateX(-3px);
+  }
+}
+
+.word-card.hit-flash {
+  animation: card-hit 220ms ease-out;
+}
+@keyframes card-hit {
+  0% {
+    filter: brightness(1);
+  }
+  35% {
+    filter: brightness(2) saturate(1.5);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+/* Prompt text */
+.word-card .prompt {
+  font-size: 20px;
+  letter-spacing: 2px;
+  color: var(--ink);
+  font-weight: bold;
+  display: inline-block;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.word-card .prompt .letter {
+  display: inline-block;
+  transition:
+    color 80ms,
+    transform 80ms;
+}
+
+.word-card .prompt .letter.typed {
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(233, 196, 106, 0.85);
+}
+
+.word-card .prompt .letter.next {
+  color: var(--success);
+  animation: letter-next 0.9s ease-in-out infinite;
+}
+@keyframes letter-next {
+  0%,
+  100% {
+    opacity: 0.95;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.word-card .prompt .letter.space {
+  margin: 0 2px;
+}
+
+/* Enemy HP indicator under prompt */
+.word-card .hp-pips {
+  margin-top: 6px;
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+  height: 4px;
+}
+.word-card .hp-pips .pip {
+  width: 16px;
+  height: 4px;
+  background: rgba(244, 236, 216, 0.25);
+  border-radius: 1px;
+  transition: background 160ms;
+}
+.word-card .hp-pips .pip.full {
+  background: linear-gradient(90deg, #e94f4f, #c14242);
+}
+
+/* Intent row: damage value + numeric attack countdown */
+.word-card .intent {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  font-family: var(--font-game);
+  text-transform: uppercase;
+  line-height: 1;
+}
+.word-card .intent .dmg {
+  color: var(--danger);
+  font-weight: bold;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+.word-card .intent .sep {
+  color: rgba(244, 236, 216, 0.4);
+}
+.word-card .intent .timer {
+  color: var(--accent);
+  min-width: 36px;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.word-card.danger .intent .timer {
+  color: var(--danger);
+  animation: timer-blink 0.4s ease-in-out infinite;
+}
+@keyframes timer-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.word-card.danger {
+  animation: card-danger-pulse 0.6s ease-in-out infinite;
+}
+@keyframes card-danger-pulse {
+  0%,
+  100% {
+    border-color: var(--danger);
+    box-shadow:
+      0 4px 14px rgba(233, 79, 79, 0.6),
+      inset 0 0 12px rgba(233, 79, 79, 0.25);
+  }
+  50% {
+    border-color: rgba(233, 79, 79, 0.45);
+    box-shadow:
+      0 4px 14px rgba(233, 79, 79, 0.25),
+      inset 0 0 6px rgba(233, 79, 79, 0.1);
+  }
+}
+
+/* Caster / phrase enemy gets extra width */
+.word-card.phrase {
+  min-width: 180px;
+  background: rgba(20, 8, 24, 0.88);
+  border-color: rgba(182, 49, 74, 0.55);
+}
+.word-card.phrase.targeted {
+  border-color: #e9385f;
+  box-shadow:
+    0 6px 18px rgba(233, 56, 95, 0.4),
+    inset 0 0 8px rgba(233, 56, 95, 0.2);
+}
+
+/* Elite/boss word card */
+.word-card.elite {
+  border-color: var(--accent);
+  background: rgba(28, 14, 8, 0.92);
+}
+.word-card.boss {
+  font-size: 24px;
+  min-width: 280px;
+  background: rgba(40, 10, 20, 0.92);
+  border: 2px solid var(--boss);
+  box-shadow:
+    0 0 24px rgba(182, 49, 74, 0.5),
+    inset 0 0 10px rgba(182, 49, 74, 0.25);
+}
+.word-card.boss .prompt {
+  font-size: 26px;
+  letter-spacing: 3px;
+}
+
+/* Connector line from card to enemy (subtle) — placed on the side facing the enemy. */
+.word-card::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 1px;
+  height: 8px;
+  background: rgba(244, 236, 216, 0.3);
+  transform: translateX(-50%);
+}
+.word-card.anchor-top::after {
+  bottom: -8px;
+}
+.word-card.anchor-bottom::after {
+  top: -8px;
+}

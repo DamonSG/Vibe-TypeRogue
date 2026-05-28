@@ -1,0 +1,142 @@
+.upgrade-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(20, 10, 28, 0.92) 0%,
+    rgba(7, 5, 13, 0.98) 100%
+  );
+  pointer-events: auto;
+  z-index: 40;
+  gap: 36px;
+  opacity: 0;
+  animation: modal-in 380ms ease-out forwards;
+}
+@keyframes modal-in {
+  to {
+    opacity: 1;
+  }
+}
+
+.upgrade-modal h2 {
+  font-family: var(--font-display);
+  font-size: 36px;
+  letter-spacing: 4px;
+  color: var(--accent);
+  text-transform: uppercase;
+  text-shadow: 0 0 16px rgba(233, 196, 106, 0.55);
+}
+
+.upgrade-modal .subtitle {
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  margin-top: -24px;
+}
+
+.upgrade-cards {
+  display: flex;
+  gap: 28px;
+  justify-content: center;
+}
+
+.upgrade-card {
+  width: 260px;
+  min-height: 320px;
+  padding: 24px 22px;
+  background: linear-gradient(
+    180deg,
+    rgba(28, 18, 38, 0.95) 0%,
+    rgba(14, 8, 22, 0.95) 100%
+  );
+  border: 2px solid rgba(244, 236, 216, 0.25);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+  transition:
+    transform 180ms ease-out,
+    border-color 180ms,
+    box-shadow 180ms;
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(244, 236, 216, 0.08);
+  position: relative;
+}
+
+.upgrade-card:hover {
+  transform: translateY(-6px);
+  border-color: var(--accent);
+  box-shadow:
+    0 12px 28px rgba(233, 196, 106, 0.35),
+    inset 0 1px 0 rgba(244, 236, 216, 0.12);
+}
+
+.upgrade-card .category {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+}
+
+.upgrade-card .name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  color: var(--accent);
+  letter-spacing: 2px;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.upgrade-card .description {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+  letter-spacing: 0.5px;
+  flex: 1;
+}
+
+.upgrade-card .flavor {
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-style: italic;
+  letter-spacing: 1px;
+  border-top: 1px solid rgba(244, 236, 216, 0.18);
+  padding-top: 10px;
+}
+
+.upgrade-card .key-hint {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(244, 236, 216, 0.4);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.upgrade-card.category-offense {
+  border-color: rgba(233, 196, 106, 0.4);
+}
+.upgrade-card.category-defense {
+  border-color: rgba(110, 195, 233, 0.4);
+}
+.upgrade-card.category-combo {
+  border-color: rgba(233, 163, 106, 0.4);
+}
+.upgrade-card.category-risk {
+  border-color: rgba(233, 79, 79, 0.4);
+}
+.upgrade-card.category-utility {
+  border-color: rgba(244, 236, 216, 0.4);
+}

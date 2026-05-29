@@ -50,6 +50,9 @@ export const TUNING = {
     killVolume: 0.7,
     phaseVolume: 0.8,
     musicVolume: 0.0, // no music in V1
+    /** Default SFX/music bus levels (0..1) — overridden by saved settings. */
+    defaultSfxVolume: 0.8,
+    defaultMusicVolume: 0.5,
   },
 
   feedback: {
@@ -59,6 +62,10 @@ export const TUNING = {
     damageFlashMs: 320,
     /** ms input bar mistake flash */
     inputMistakeMs: 320,
+    /** ms for a floating damage number to rise and fade out */
+    damageNumberMs: 800,
+    /** ms for the per-enemy sprite hit flash/shake */
+    spriteHitMs: 180,
   },
 
   encounter: {

@@ -23,12 +23,19 @@ type SoundEvent =
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** SFX bus — all sound effects route here. Controlled by the SFX slider. */
+  private sfxGain: GainNode | null = null;
+  /** Music bus — background music routes here (no source yet). Controlled by the Music slider. */
+  private musicGain: GainNode | null = null;
   /** Pre-built noise buffer used for "shh"/impact components. */
   private noiseBuffer: AudioBuffer | null = null;
   /** Track when audio is first unlocked (browser requires user gesture). */
   private unlocked = false;
   /** Slight variation in tick pitch for satisfying rolls. */
   private tickIndex = 0;
+  /** Cached volumes (0..1) so settings set before unlock still apply on unlock. */
+  private sfxVolume: number = TUNING.audio.defaultSfxVolume;
+  private musicVolume: number = TUNING.audio.defaultMusicVolume;
 
   /** Must be called from a user gesture (first keydown). */
   unlock(): void {
@@ -42,6 +49,13 @@ export class AudioEngine {
       this.master = this.ctx.createGain();
       this.master.gain.value = TUNING.audio.masterVolume;
       this.master.connect(this.ctx.destination);
+      // SFX + Music buses both feed the master.
+      this.sfxGain = this.ctx.createGain();
+      this.sfxGain.gain.value = this.sfxVolume;
+      this.sfxGain.connect(this.master);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = this.musicVolume;
+      this.musicGain.connect(this.master);
       this.noiseBuffer = this.buildNoiseBuffer(this.ctx, 0.8);
       this.unlocked = true;
     } catch (err) {
@@ -52,6 +66,22 @@ export class AudioEngine {
   setMasterVolume(v: number): void {
     if (!this.master || !this.ctx) return;
     this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+  }
+
+  /** Set SFX bus volume (0..1) — typing, UI, hits, deaths, rewards, combat. */
+  setSfxVolume(v: number): void {
+    this.sfxVolume = Math.max(0, Math.min(1, v));
+    if (this.sfxGain && this.ctx) {
+      this.sfxGain.gain.setTargetAtTime(this.sfxVolume, this.ctx.currentTime, 0.03);
+    }
+  }
+
+  /** Set Music bus volume (0..1) — background music only. */
+  setMusicVolume(v: number): void {
+    this.musicVolume = Math.max(0, Math.min(1, v));
+    if (this.musicGain && this.ctx) {
+      this.musicGain.gain.setTargetAtTime(this.musicVolume, this.ctx.currentTime, 0.05);
+    }
   }
 
   play(event: SoundEvent): void {
@@ -117,7 +147,7 @@ export class AudioEngine {
     g.gain.linearRampToValueAtTime(TUNING.audio.tickVolume, t + 0.003);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
     osc.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     osc.start(t);
     osc.stop(t + 0.08);
   }
@@ -139,7 +169,7 @@ export class AudioEngine {
     filt.frequency.value = 800;
     osc.connect(filt);
     filt.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     osc.start(t);
     osc.stop(t + 0.18);
   }
@@ -159,7 +189,7 @@ export class AudioEngine {
     filt.frequency.exponentialRampToValueAtTime(400, t + 0.18);
     noise.connect(filt);
     filt.connect(nGain);
-    nGain.connect(this.master);
+    nGain.connect(this.sfxGain!);
     noise.start(t);
     noise.stop(t + 0.22);
 
@@ -171,7 +201,7 @@ export class AudioEngine {
     sg.gain.setValueAtTime(TUNING.audio.impactVolume * 0.55, t);
     sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
     sine.connect(sg);
-    sg.connect(this.master);
+    sg.connect(this.sfxGain!);
     sine.start(t);
     sine.stop(t + 0.2);
   }
@@ -193,7 +223,7 @@ export class AudioEngine {
     nG.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
     noise.connect(filt);
     filt.connect(nG);
-    nG.connect(this.master);
+    nG.connect(this.sfxGain!);
     noise.start(t);
     noise.stop(t + 0.45);
 
@@ -206,7 +236,7 @@ export class AudioEngine {
     sG.gain.setValueAtTime(TUNING.audio.killVolume * 0.6, t);
     sG.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
     sine.connect(sG);
-    sG.connect(this.master);
+    sG.connect(this.sfxGain!);
     sine.start(t);
     sine.stop(t + 0.4);
 
@@ -219,7 +249,7 @@ export class AudioEngine {
     shG.gain.setValueAtTime(TUNING.audio.killVolume * 0.25, t);
     shG.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
     sh.connect(shG);
-    shG.connect(this.master);
+    shG.connect(this.sfxGain!);
     sh.start(t);
     sh.stop(t + 0.22);
   }
@@ -237,7 +267,7 @@ export class AudioEngine {
     g.gain.linearRampToValueAtTime(0.25, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
     osc.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     osc.start(t);
     osc.stop(t + 0.14);
   }
@@ -257,7 +287,7 @@ export class AudioEngine {
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
     noise.connect(filt);
     filt.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     noise.start(t);
     noise.stop(t + 0.4);
 
@@ -269,7 +299,7 @@ export class AudioEngine {
     sg.gain.setValueAtTime(0.4, t);
     sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
     sine.connect(sg);
-    sg.connect(this.master);
+    sg.connect(this.sfxGain!);
     sine.start(t);
     sine.stop(t + 0.35);
   }
@@ -291,7 +321,7 @@ export class AudioEngine {
     filt.frequency.value = 1800;
     osc.connect(filt);
     filt.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     osc.start(t);
     osc.stop(t + 0.22);
   }
@@ -311,7 +341,7 @@ export class AudioEngine {
     sg.gain.linearRampToValueAtTime(TUNING.audio.phaseVolume * 0.7, t + 0.1);
     sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.95);
     sine.connect(sg);
-    sg.connect(this.master);
+    sg.connect(this.sfxGain!);
     sine.start(t);
     sine.stop(t + 1.0);
     // Noise tail
@@ -325,7 +355,7 @@ export class AudioEngine {
     nG.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
     noise.connect(filt);
     filt.connect(nG);
-    nG.connect(this.master);
+    nG.connect(this.sfxGain!);
     noise.start(t);
     noise.stop(t + 0.65);
   }
@@ -344,7 +374,7 @@ export class AudioEngine {
       g.gain.linearRampToValueAtTime(0.32, t + i * 0.14 + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.14 + 0.5);
       osc.connect(g);
-      g.connect(this.master!);
+      g.connect(this.sfxGain!);
       osc.start(t + i * 0.14);
       osc.stop(t + i * 0.14 + 0.6);
     });
@@ -368,7 +398,7 @@ export class AudioEngine {
       filt.frequency.value = 900;
       osc.connect(filt);
       filt.connect(g);
-      g.connect(this.master!);
+      g.connect(this.sfxGain!);
       osc.start(t + i * 0.18);
       osc.stop(t + i * 0.18 + 0.8);
     });
@@ -388,7 +418,7 @@ export class AudioEngine {
       g.gain.linearRampToValueAtTime(0.24, t + i * 0.07 + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.07 + 0.3);
       osc.connect(g);
-      g.connect(this.master!);
+      g.connect(this.sfxGain!);
       osc.start(t + i * 0.07);
       osc.stop(t + i * 0.07 + 0.32);
     });
@@ -407,7 +437,7 @@ export class AudioEngine {
     g.gain.linearRampToValueAtTime(0.22, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
     osc.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     osc.start(t);
     osc.stop(t + 0.22);
   }
@@ -429,7 +459,7 @@ export class AudioEngine {
     filt.frequency.value = 1800;
     osc.connect(filt);
     filt.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain!);
     osc.start(t);
     osc.stop(t + 0.12);
   }

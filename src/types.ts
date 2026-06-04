@@ -16,14 +16,12 @@ export type UpgradeCategory =
 
 export type GameMode =
   | "title"
-  | "countdown"
   | "encounter"
   | "transition"
   | "upgrade"
   | "boss"
   | "victory"
-  | "defeat"
-  | "results";
+  | "defeat";
 
 export interface EnemyDef {
   kind: EnemyKind;

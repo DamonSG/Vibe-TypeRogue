@@ -1,14 +1,6 @@
 import * as THREE from "three";
 import type { Enemy, EnemyKind } from "../types";
 import type { SceneRenderer } from "./SceneRenderer";
-import { TUNING } from "../data/tuning";
-
-/**
- * World-space horizontal spread applied to each enemy's normalized laneX.
- * Wider spacing keeps adjacent word cards from overlapping; the value stays
- * well inside the camera frustum at the enemies' depth.
- */
-const LANE_SPREAD = 4.6;
 
 /**
  * EnemyView builds and maintains the Three.js Sprite for each enemy. Procedural
@@ -20,8 +12,6 @@ export class EnemyView {
   private textureCache = new Map<string, THREE.CanvasTexture>();
   /** Per-enemy lunge offset for attack visual */
   private lungeOffsets = new Map<string, number>();
-  /** Per-enemy remaining hit-flash time in ms (white flash + shake on damage). */
-  private hitFlash = new Map<string, number>();
 
   constructor(private sr: SceneRenderer) {}
 
@@ -40,15 +30,6 @@ export class EnemyView {
       const baseScale = e.def.scale * 1.4;
       sprite.scale.set(baseScale * 0.9 * spawnT, baseScale * 1.35 * spawnT, 1);
       const pos = this.computeWorldPos(e, elapsedMs);
-      // Hit-shake: brief horizontal jitter while the hit-flash timer is active.
-      const flashRemain = this.hitFlash.get(e.id) ?? 0;
-      let flashT = 0;
-      if (flashRemain > 0) {
-        const next = Math.max(0, flashRemain - deltaMs);
-        this.hitFlash.set(e.id, next);
-        flashT = next / TUNING.feedback.spriteHitMs;
-        pos.x += Math.sin(elapsedMs * 0.08) * 0.08 * flashT;
-      }
       sprite.position.copy(pos);
       sprite.material.opacity =
         (e.dying ? Math.max(0, e.dyingMs / 320) : 1) * spawnT;
@@ -63,12 +44,6 @@ export class EnemyView {
         sprite.material.color.lerp(new THREE.Color(0xffffff), 0.85);
         // gradual desaturate back
         if (Math.random() < 0.1) e.mistakeOnCurrent = false;
-      } else if (flashT > 0) {
-        // Damage hit-flash: blow out toward white briefly.
-        sprite.material.color.set(0xffffff);
-        sprite.material.color.lerp(new THREE.Color(0xffd0d0), 1 - flashT);
-        const b = 1 + 0.8 * flashT;
-        sprite.material.color.multiplyScalar(b);
       } else {
         sprite.material.color.set(0xffffff);
       }
@@ -84,7 +59,6 @@ export class EnemyView {
         }
         this.sprites.delete(id);
         this.lungeOffsets.delete(id);
-        this.hitFlash.delete(id);
       }
     }
   }
@@ -92,11 +66,6 @@ export class EnemyView {
   /** Trigger a brief forward lunge anim for an enemy attack. */
   lunge(enemyId: string): void {
     this.lungeOffsets.set(enemyId, 1.0);
-  }
-
-  /** Trigger a brief white flash + shake when an enemy takes damage. */
-  hit(enemyId: string): void {
-    this.hitFlash.set(enemyId, TUNING.feedback.spriteHitMs);
   }
 
   /** World position above or below the enemy (alternating per spawn) — used for word card anchor. */
@@ -114,7 +83,6 @@ export class EnemyView {
       this.sr.remove(s);
       if (s.material instanceof THREE.SpriteMaterial) s.material.dispose();
       this.sprites.delete(enemyId);
-      this.hitFlash.delete(enemyId);
     }
   }
 
@@ -126,7 +94,6 @@ export class EnemyView {
     }
     this.sprites.clear();
     this.lungeOffsets.clear();
-    this.hitFlash.clear();
   }
 
   // ---------- Internals ----------
@@ -148,7 +115,7 @@ export class EnemyView {
 
   private computeWorldPos(enemy: Enemy, _elapsed: number): THREE.Vector3 {
     // depth 1 = far, 0 = at player
-    const worldX = enemy.laneX * LANE_SPREAD;
+    const worldX = enemy.laneX * 3.2;
     const worldZ = -1 - enemy.depth * 9;
     // Lunge offset (briefly closer when attacking)
     const lungeVal = this.lungeOffsets.get(enemy.id) ?? 0;

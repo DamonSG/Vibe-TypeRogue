@@ -16,8 +16,6 @@ export class BossSystem {
   private bossEnemy: Enemy | null = null;
   private currentPhaseIndex = 0;
   private summonTimer = 0;
-  /** HP/damage multiplier applied to the boss (Endless scales this up). */
-  private scale = 1;
   active = false;
 
   constructor(
@@ -29,26 +27,24 @@ export class BossSystem {
     this.bossEnemy = null;
     this.currentPhaseIndex = 0;
     this.summonTimer = 0;
-    this.scale = 1;
     this.active = false;
   }
 
   /** Bind to the boss enemy spawned by the encounter. */
-  bindBoss(scale = 1): void {
+  bindBoss(): void {
     const boss = this.state.enemies.find((e) => e.def.kind === "boss" && e.alive);
     if (!boss) return;
     this.bossEnemy = boss;
     this.currentPhaseIndex = 0;
     this.summonTimer = 0;
-    this.scale = Math.max(1, scale);
     this.active = true;
     const phase0 = CURSED_KNIGHT.phases[0];
-    // Override boss HP from def with the proper (scaled) number
-    boss.hp = Math.round(CURSED_KNIGHT.hp * this.scale);
-    boss.maxHp = Math.round(CURSED_KNIGHT.hp * this.scale);
+    // Override boss HP from def with the proper number
+    boss.hp = CURSED_KNIGHT.hp;
+    boss.maxHp = CURSED_KNIGHT.hp;
     // Apply phase 0 cadence + prompts
     boss.def.attackTimerMs = phase0.attackTimerMs;
-    boss.def.damage = Math.round(phase0.damage * this.scale);
+    boss.def.damage = phase0.damage;
     setEnemyPrompt(boss, pickFreshPrompt(phase0.promptPool));
   }
 
@@ -74,7 +70,7 @@ export class BossSystem {
       this.currentPhaseIndex++;
       const newPhase = CURSED_KNIGHT.phases[this.currentPhaseIndex];
       boss.def.attackTimerMs = newPhase.attackTimerMs;
-      boss.def.damage = Math.round(newPhase.damage * this.scale);
+      boss.def.damage = newPhase.damage;
       this.summonTimer = 0;
       // Set new prompt from phase pool
       setEnemyPrompt(boss, pickFreshPrompt(newPhase.promptPool));

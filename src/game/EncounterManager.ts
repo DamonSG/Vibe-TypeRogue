@@ -1,6 +1,12 @@
-import type { EncounterDef, EnemyKind } from "../types";
-import { ENCOUNTERS } from "../data/encounters";
+import type { EncounterDef, EnemyKind, EnemyDef } from "../types";
+import { CASTLE_ENCOUNTERS } from "../data/encounters";
 import { TUNING } from "../data/tuning";
+import { ENEMY_DEFS } from "../data/enemies";
+import { GAME_MODES, type RunModeId } from "../data/modes";
+import {
+  generateEndlessLevel,
+  endlessEnemyScale,
+} from "./EndlessGenerator";
 import { GameState, spawnEnemy } from "./GameState";
 
 export type EncounterPhase =
@@ -31,6 +37,7 @@ export class EncounterManager {
   phase: EncounterPhase = "idle";
   currentIndex = -1;
   currentDef: EncounterDef | null = null;
+  private mode: RunModeId = "cursedCastleRun";
   private currentWaveIndex = 0;
   private pendingSpawns: PendingSpawn[] = [];
   private waveTimer = 0;
@@ -41,6 +48,12 @@ export class EncounterManager {
     private state: GameState,
     private cbs: EncounterCallbacks,
   ) {}
+
+  /** Select which mode's stage source this manager draws from. */
+  configure(mode: RunModeId): void {
+    this.mode = mode;
+    this.reset();
+  }
 
   reset(): void {
     this.phase = "idle";
@@ -53,6 +66,17 @@ export class EncounterManager {
     this.transitionTimer = 0;
   }
 
+  /** Resolve the encounter definition for a 0-based index in the current mode. */
+  private defForIndex(index: number): EncounterDef | null {
+    if (index < 0) return null;
+    if (this.mode === "endlessCrypt") {
+      const level = index + 1;
+      if (level > GAME_MODES.endlessCrypt.maxStages) return null;
+      return generateEndlessLevel(level);
+    }
+    return CASTLE_ENCOUNTERS[index] ?? null;
+  }
+
   /** Start the run — kick off encounter 0. */
   startRun(): void {
     this.reset();
@@ -61,12 +85,13 @@ export class EncounterManager {
 
   /** Begin encounter at given index. */
   startEncounter(index: number): void {
-    if (index < 0 || index >= ENCOUNTERS.length) {
+    const def = this.defForIndex(index);
+    if (!def) {
       this.cbs.onAllEncountersCleared();
       return;
     }
     this.currentIndex = index;
-    this.currentDef = ENCOUNTERS[index];
+    this.currentDef = def;
     this.currentWaveIndex = 0;
     this.pendingSpawns = [];
     this.waveTimer = 0;
@@ -99,6 +124,7 @@ export class EncounterManager {
           laneX: s.laneX,
           depth: s.startDepth,
           promptOverride: s.promptOverride,
+          defOverride: this.scaledDefOverride(s.kind),
         });
         this.state.enemies.push(e);
         this.cbs.onEnemySpawned(e.id);
@@ -174,8 +200,37 @@ export class EncounterManager {
     }
   }
 
-  /** Number of encounters configured. */
+  /** Endless: scale non-boss enemy stats by current depth. Boss unscaled here. */
+  private scaledDefOverride(kind: EnemyKind): Partial<EnemyDef> | undefined {
+    if (this.mode !== "endlessCrypt" || kind === "boss") return undefined;
+    const base = ENEMY_DEFS[kind];
+    const sc = endlessEnemyScale(this.currentIndex + 1);
+    return {
+      hp: Math.round(base.hp * sc.hp),
+      damage: Math.round(base.damage * sc.damage),
+      approachSpeed: base.approachSpeed * sc.speed,
+    };
+  }
+
+  /** Advance to the next level after a boss checkpoint (Endless). */
+  advanceAfterBoss(): void {
+    this.beginTransition();
+  }
+
+  /** Number of encounters configured for the current mode. */
   totalEncounters(): number {
-    return ENCOUNTERS.length;
+    if (this.mode === "endlessCrypt") return GAME_MODES.endlessCrypt.maxStages;
+    return CASTLE_ENCOUNTERS.length;
+  }
+
+  /**
+   * Shift absolute spawn timestamps forward by `ms` so a pause doesn't cause
+   * queued spawns to fire instantly on resume. Delta-accumulated timers
+   * (waveTimer/postClearTimer/transitionTimer) are unaffected.
+   */
+  shiftTimers(ms: number): void {
+    for (const s of this.pendingSpawns) {
+      s.fireAt += ms;
+    }
   }
 }

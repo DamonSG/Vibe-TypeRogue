@@ -1,16 +1,20 @@
 import * as THREE from "three";
 import type { Enemy, EncounterDef, BossPhaseDef } from "../types";
 import { TUNING } from "../data/tuning";
-import { ENCOUNTERS } from "../data/encounters";
+import { GAME_MODES, DEFAULT_MODE, type RunModeId } from "../data/modes";
+import { generateFortyWords } from "../data/fortyWords";
+import { endlessBossScale } from "./EndlessGenerator";
 
 import { GameState, refreshEnemyPrompt } from "./GameState";
 import { InputManager, InputEventLite } from "./InputManager";
 import { TypingSystem } from "./TypingSystem";
 import { CombatSystem } from "./CombatSystem";
 import { EncounterManager } from "./EncounterManager";
+import { TimeAttackManager } from "./TimeAttackManager";
 import { UpgradeSystem } from "./UpgradeSystem";
 import { BossSystem } from "./BossSystem";
 import { AudioEngine } from "./AudioEngine";
+import { StatsStore } from "./StatsStore";
 
 import { SceneRenderer } from "../render/SceneRenderer";
 import { ParallaxScene } from "../render/ParallaxScene";
@@ -18,6 +22,13 @@ import { EnemyView } from "../render/EnemyView";
 import { Effects } from "../render/Effects";
 import { UI } from "../render/UI";
 import type { EndScreenStats } from "../render/UI";
+import { DamageNumbers } from "../render/DamageNumbers";
+import { StageIndicator } from "../render/StageIndicator";
+import { SettingsStore } from "../ui/SettingsStore";
+import { SettingsScreen } from "../ui/SettingsScreen";
+import { MainMenu } from "../ui/MainMenu";
+import { PauseMenu } from "../ui/PauseMenu";
+import { RecordsScreen } from "../ui/RecordsScreen";
 
 /**
  * Game: top-level orchestrator. Owns every system, runs the main loop, and
@@ -36,9 +47,21 @@ export class Game {
   private enemyView: EnemyView;
   private effects: Effects;
   private ui: UI;
+  private damageNumbers: DamageNumbers;
+  private stageIndicator: StageIndicator;
+
+  private settingsStore: SettingsStore;
+  private settingsScreen: SettingsScreen;
+  private mainMenu: MainMenu;
+  private pauseMenu: PauseMenu;
+  private statsStore: StatsStore;
+  private records: RecordsScreen;
 
   private encounter: EncounterManager;
+  private timeAttack: TimeAttackManager;
   private boss: BossSystem;
+  /** Set once per finished run so stats are recorded exactly once. */
+  private statsRecorded = false;
 
   private lastFrameTime = 0;
   private rafHandle = 0;
@@ -46,6 +69,10 @@ export class Game {
   private acceptingTypingInput = false;
   /** Number of encounters remaining before victory check */
   private bossEncounterStarted = false;
+  /** Whether the run is currently paused. */
+  private paused = false;
+  /** performance.now() at the moment the run was paused (for timer shifting). */
+  private pauseStartedAt = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new SceneRenderer(canvas);
@@ -53,6 +80,44 @@ export class Game {
     this.enemyView = new EnemyView(this.renderer);
     this.effects = new Effects(this.renderer);
     this.ui = new UI();
+    const uiRoot = document.getElementById("ui-root")!;
+    this.damageNumbers = new DamageNumbers(uiRoot);
+    this.stageIndicator = new StageIndicator(uiRoot);
+
+    // Settings (persisted) + shared settings screen
+    this.settingsStore = new SettingsStore(this.audio);
+    this.settingsStore.apply();
+    this.settingsScreen = new SettingsScreen(uiRoot, this.settingsStore, () =>
+      this.audio.play("uiSelect"),
+    );
+
+    // Persisted records / lifetime stats + records screen
+    this.statsStore = new StatsStore();
+    this.records = new RecordsScreen(uiRoot, this.statsStore, {
+      onBack: () => this.showTitleMenu(),
+      onUiSound: () => this.audio.play("uiSelect"),
+    });
+
+    // Main menu (replaces the old press-any-key title)
+    this.mainMenu = new MainMenu(uiRoot, this.settingsScreen, {
+      onStartGame: (mode) => this.startRun(mode),
+      onShowRecords: () => this.showRecords(),
+      onUiSound: () => this.audio.play("uiSelect"),
+    });
+
+    // Pause menu + top-right pause button
+    this.pauseMenu = new PauseMenu(
+      uiRoot,
+      this.settingsScreen,
+      {
+        onResume: () => this.resumeRun(),
+        onRestart: () => this.restartRun(),
+        onAbandon: () => this.abandonRun(),
+        onExitToMenu: () => this.exitToMenu(),
+        onUiSound: () => this.audio.play("uiSelect"),
+      },
+      () => this.togglePause(),
+    );
 
     this.encounter = new EncounterManager(this.state, {
       onEncounterStart: (i, def) => this.handleEncounterStart(i, def),
@@ -61,6 +126,15 @@ export class Game {
       onBossEncounterStart: (def) => this.handleBossEncounterStart(def),
       onEnemySpawned: () => {
         /* nothing required — UI lazily creates card on first frame */
+      },
+    });
+
+    this.timeAttack = new TimeAttackManager(this.state, {
+      onWordSpawned: () => {
+        /* UI lazily creates the card on the next frame */
+      },
+      onFirstWord: () => {
+        /* timer start handled inside TimeAttackManager */
       },
     });
 
@@ -77,10 +151,7 @@ export class Game {
   }
 
   start(): void {
-    this.state.mode = "title";
-    this.ui.showTitleScreen(() => {
-      /* placeholder — actual start gated by input below */
-    });
+    this.showTitleMenu();
     this.lastFrameTime = performance.now();
     this.loop();
   }
@@ -99,17 +170,47 @@ export class Game {
     // Always render scene + parallax
     this.parallax.update(deltaMs);
 
-    if (
+    const isTimeAttack = this.state.runMode === "fortyWords";
+    const inCombat =
       this.state.mode === "encounter" ||
       this.state.mode === "boss" ||
-      this.state.mode === "transition"
-    ) {
+      this.state.mode === "transition";
+
+    // Stage indicator + pause button visibility track active gameplay.
+    const showTracker = inCombat || this.state.mode === "countdown";
+    this.stageIndicator.setVisible(showTracker);
+    const showGameplayUi =
+      inCombat ||
+      this.state.mode === "countdown" ||
+      this.state.mode === "upgrade" ||
+      this.state.mode === "victory" ||
+      this.state.mode === "defeat" ||
+      this.state.mode === "results";
+    this.ui.setGameplayVisible(showGameplayUi);
+    const now = performance.now();
+    if (isTimeAttack) {
+      this.stageIndicator.setReadout({
+        wordsCleared: this.state.wordsCleared,
+        targetWords: GAME_MODES.fortyWords.targetWords ?? 40,
+        elapsedMs: this.state.getElapsedMs(now),
+        wpm: this.state.getWpm(now),
+      });
+    } else if (inCombat) {
+      this.stageIndicator.update(this.state.encounterIndex);
+    }
+    this.pauseMenu.setPauseButtonVisible(inCombat && !this.paused);
+
+    if (inCombat && !this.paused) {
       this.updateEnemies(deltaMs);
-      this.encounter.update(deltaMs);
-      if (this.boss.active) {
-        this.boss.update(deltaMs, () => {
-          /* spawn cb — Encounter manager handles spawn list, BossSystem inserts directly */
-        });
+      if (isTimeAttack) {
+        this.timeAttack.update(deltaMs);
+      } else {
+        this.encounter.update(deltaMs);
+        if (this.boss.active) {
+          this.boss.update(deltaMs, () => {
+            /* spawn cb — Encounter manager handles spawn list, BossSystem inserts directly */
+          });
+        }
       }
       // Combo decay
       if (this.state.combo > 0 && this.state.lastWordAt > 0) {
@@ -120,8 +221,8 @@ export class Game {
       }
       // Validate input vs alive enemies
       this.typing.validateAgainstEnemies(this.state.enemies);
-      // Player HP check
-      if (this.state.hp <= 0) {
+      // Player HP check (time-attack has no enemy attacks / death)
+      if (!isTimeAttack && this.state.hp <= 0) {
         this.triggerDefeat();
       }
     }
@@ -136,6 +237,13 @@ export class Game {
       this.enemyView,
       this.typing,
       this.upgrades.buildIdentity(this.state),
+      {
+        wpm: this.state.getWpm(now),
+        elapsedMs: this.state.getElapsedMs(now),
+        modeType: GAME_MODES[this.state.runMode].modeType,
+        wordsCleared: this.state.wordsCleared,
+        targetWords: GAME_MODES.fortyWords.targetWords ?? 40,
+      },
     );
 
     // Boss bar update
@@ -166,11 +274,13 @@ export class Game {
       const dz =
         (e.def.approachSpeed * deltaMs) / TUNING.enemyApproach.baseApproachMs;
       e.depth = Math.max(targetDepth, e.depth - dz);
-      // Attack timer
-      e.attackTimer += deltaMs;
-      if (e.attackTimer >= e.def.attackTimerMs) {
-        this.handleEnemyAttack(e);
-        e.attackTimer = 0;
+      // Attack timer — disabled in 40 Words (pure speedrun, no player damage).
+      if (this.state.runMode !== "fortyWords") {
+        e.attackTimer += deltaMs;
+        if (e.attackTimer >= e.def.attackTimerMs) {
+          this.handleEnemyAttack(e);
+          e.attackTimer = 0;
+        }
       }
     }
   }
@@ -181,12 +291,21 @@ export class Game {
     // Unlock audio on first keypress
     this.audio.unlock();
 
-    // Title screen: any key starts run
+    // Title screen: any key starts run (fallback only while the main menu is up,
+    // not while Settings / Game Mode / Records sub-screens are open).
     if (this.state.mode === "title") {
-      if (ev.type === "any") {
-        this.ui.hideTitleScreen();
-        this.startRun();
+      if (
+        ev.type === "any" &&
+        !this.settingsScreen.isOpen &&
+        !this.records.isOpen
+      ) {
+        this.mainMenu.handleAnyKey();
       }
+      return;
+    }
+
+    // Countdown / results screens: typing is inert (buttons drive results).
+    if (this.state.mode === "countdown" || this.state.mode === "results") {
       return;
     }
 
@@ -217,6 +336,13 @@ export class Game {
       this.state.mode === "boss" ||
       this.state.mode === "transition"
     ) {
+      // Escape toggles the pause menu during gameplay.
+      if (ev.type === "escape") {
+        this.togglePause();
+        return;
+      }
+      // While paused (or any menu overlay is open) typing must not affect combat.
+      if (this.paused || this.settingsScreen.isOpen) return;
       if (!this.acceptingTypingInput) return;
       if (ev.type === "backspace") {
         this.typing.backspace();
@@ -224,9 +350,6 @@ export class Game {
       }
       if (ev.type === "char") {
         this.processTypingChar(ev.value);
-      }
-      if (ev.type === "escape") {
-        this.typing.reset();
       }
     }
   }
@@ -274,6 +397,7 @@ export class Game {
       });
       this.effects.domShake("light");
       this.ui.flashHit(enemy.id);
+      this.enemyView.hit(enemy.id);
     }
 
     // Refresh card prompt visually if enemy survived and refreshOnSurvive
@@ -295,13 +419,17 @@ export class Game {
       } else {
         this.effects.hitSpark(cAnchor, c.enemy.colorHint);
         this.ui.flashHit(c.enemy.id);
+        this.enemyView.hit(c.enemy.id);
       }
+      // Floating damage number for each chained hit.
+      const cScreen = this.ui.worldToScreen(cAnchor, this.renderer);
+      this.damageNumbers.spawn(c.damage, cScreen.x, cScreen.y);
     }
 
-    // Popup
+    // Floating damage number for the primary hit.
     const screen = this.ui.worldToScreen(anchor, this.renderer);
-    const popupKind = result.damage >= 50 ? "crit" : "damage";
-    this.ui.spawnPopup(`-${result.damage}`, popupKind, screen.x, screen.y);
+    const dmgKind = result.damage >= 50 ? "crit" : "damage";
+    this.damageNumbers.spawn(result.damage, screen.x, screen.y, dmgKind);
     if (result.healed > 0) {
       this.ui.spawnPopup(`+${result.healed} HP`, "heal", screen.x, screen.y - 20);
     }
@@ -315,6 +443,16 @@ export class Game {
     }
     if (this.state.combo - prevCombo > 1) {
       this.ui.spawnPopup(`+${this.state.combo - prevCombo} combo`, "combo", screen.x, screen.y - 60);
+    }
+
+    // 40 Words: count clears and stop the clock exactly on the final word.
+    if (this.state.runMode === "fortyWords" && result.killed) {
+      this.timeAttack.notifyCleared();
+      this.state.wordsCleared = this.timeAttack.clearedCount;
+      if (this.timeAttack.isComplete && this.state.mode !== "results") {
+        this.state.timeAttackEndMs = performance.now();
+        this.completeFortyWords();
+      }
     }
   }
 
@@ -340,18 +478,154 @@ export class Game {
 
   // ---------- Encounter / mode flow ----------
 
-  private startRun(): void {
-    this.state.reset();
-    this.upgrades.reset();
+  private showTitleMenu(): void {
+    this.paused = false;
+    this.pauseMenu.close();
+    this.settingsScreen.close();
+    this.pauseMenu.setPauseButtonVisible(false);
+    this.stageIndicator.setVisible(false);
+    this.ui.hideEndScreen();
+    this.ui.hideCountdown();
+    this.ui.setGameplayVisible(false);
+    this.timeAttack.reset();
+    document.body.classList.remove("mode-forty-words");
+    this.boss.reset();
+    this.bossEncounterStarted = false;
+    this.state.enemies = [];
     this.enemyView.clear();
     this.effects.clear();
+    this.damageNumbers.clear();
+    this.ui.hideBossBar();
+    this.acceptingTypingInput = false;
+    this.state.mode = "title";
     this.parallax.setBossMode(false);
     this.renderer.cameraTargetZ = 0;
     this.renderer.cameraDollyOffset = 0;
-    this.state.mode = "encounter";
-    this.state.runStartTime = performance.now();
-    this.acceptingTypingInput = true;
-    this.encounter.startRun();
+    this.mainMenu.show();
+  }
+
+  private startRun(mode: RunModeId = DEFAULT_MODE): void {
+    this.mainMenu.hide();
+    this.records.close();
+    this.settingsScreen.close();
+    this.pauseMenu.close();
+    this.ui.hideEndScreen();
+    this.ui.hideCountdown();
+    this.paused = false;
+    this.boss.reset();
+    this.ui.hideBossBar();
+    this.bossEncounterStarted = false;
+    this.statsRecorded = false;
+    this.state.reset();
+    this.state.runMode = mode;
+    const cfg = GAME_MODES[mode];
+    this.state.oneShotEnemies = !!cfg.oneShotEnemies;
+    this.upgrades.reset();
+    this.enemyView.clear();
+    this.effects.clear();
+    this.damageNumbers.clear();
+    this.timeAttack.reset();
+    this.encounter.configure(mode);
+    this.stageIndicator.configure(mode);
+    this.parallax.setBossMode(false);
+    this.renderer.cameraTargetZ = 0;
+    this.renderer.cameraDollyOffset = 0;
+    document.body.classList.toggle("mode-forty-words", mode === "fortyWords");
+
+    if (cfg.modeType === "timeAttack") {
+      this.startTimeAttack();
+    } else {
+      this.state.mode = "encounter";
+      this.state.runStartTime = performance.now();
+      this.acceptingTypingInput = true;
+      this.encounter.startRun();
+    }
+  }
+
+  /** 40 Words: run the countdown, then begin spawning words (clock starts then). */
+  private startTimeAttack(): void {
+    this.state.mode = "countdown";
+    this.acceptingTypingInput = false;
+    const words = generateFortyWords(GAME_MODES.fortyWords.targetWords ?? 40);
+    this.ui.showCountdown(() => {
+      this.state.mode = "encounter";
+      this.acceptingTypingInput = true;
+      this.timeAttack.start(words);
+    });
+  }
+
+  private showRecords(): void {
+    this.mainMenu.hide();
+    this.records.open();
+  }
+
+  // ---------- Pause system ----------
+
+  private togglePause(): void {
+    if (this.paused) {
+      this.resumeRun();
+    } else {
+      this.pauseRun();
+    }
+  }
+
+  private pauseRun(): void {
+    if (this.paused) return;
+    const inCombat =
+      this.state.mode === "encounter" ||
+      this.state.mode === "boss" ||
+      this.state.mode === "transition";
+    if (!inCombat) return;
+    this.paused = true;
+    this.pauseStartedAt = performance.now();
+    this.audio.play("uiSelect");
+    this.pauseMenu.setPauseButtonVisible(false);
+    this.pauseMenu.open();
+  }
+
+  private resumeRun(): void {
+    if (!this.paused) return;
+    // Shift all absolute timestamps forward by the paused duration so nothing
+    // (combo decay, queued spawns, attack pacing) jumps on resume.
+    const pausedMs = performance.now() - this.pauseStartedAt;
+    if (pausedMs > 0) this.shiftTimers(pausedMs);
+    this.paused = false;
+    this.pauseMenu.close();
+    this.settingsScreen.close();
+  }
+
+  /** Offset wall-clock timestamps used by combat/encounter pacing. */
+  private shiftTimers(ms: number): void {
+    if (this.state.lastWordAt > 0) this.state.lastWordAt += ms;
+    if (this.state.runStartTime > 0) this.state.runStartTime += ms;
+    if (this.state.timeAttackStartMs > 0) this.state.timeAttackStartMs += ms;
+    for (const e of this.state.enemies) {
+      e.spawnedAt += ms;
+      e.wordStartedAt += ms;
+    }
+    this.encounter.shiftTimers(ms);
+  }
+
+  private restartRun(): void {
+    this.paused = false;
+    this.pauseMenu.close();
+    this.settingsScreen.close();
+    // Restart the *current* mode (not the default) so Endless / 40 Words
+    // don't silently drop the player into a Cursed Castle Run.
+    this.startRun(this.state.runMode);
+  }
+
+  private abandonRun(): void {
+    this.paused = false;
+    this.pauseMenu.close();
+    this.settingsScreen.close();
+    this.pauseMenu.setPauseButtonVisible(false);
+    this.stageIndicator.setVisible(false);
+    this.triggerDefeat();
+  }
+
+  private exitToMenu(): void {
+    this.showTitleMenu();
   }
 
   private handleEncounterStart(index: number, def: EncounterDef): void {
@@ -372,8 +646,14 @@ export class Game {
       // Boss handled separately by BossSystem (onBossDefeated)
       return;
     }
-    // Show upgrade choices if this encounter rewards them
-    if (def.rewardUpgrade && index < ENCOUNTERS.length - 1) {
+    // Show upgrade choices if this encounter rewards them and the mode uses
+    // roguelike systems (40 Words never reaches here; Endless/Castle do).
+    const cfg = GAME_MODES[this.state.runMode];
+    if (
+      def.rewardUpgrade &&
+      cfg.roguelikeEnabled &&
+      index < this.encounter.totalEncounters() - 1
+    ) {
       this.showUpgradeChoice();
     } else {
       // Transition straight to next
@@ -408,7 +688,11 @@ export class Game {
     this.bossEncounterStarted = true;
     // Defer binding until boss enemy actually spawns
     window.setTimeout(() => {
-      this.boss.bindBoss();
+      const scale =
+        this.state.runMode === "endlessCrypt"
+          ? endlessBossScale(this.state.encounterIndex + 1)
+          : 1;
+      this.boss.bindBoss(scale);
       const boss = this.boss.getBoss();
       if (boss) {
         this.ui.showBossBar(boss.def.displayName, this.boss.totalPhases());
@@ -432,6 +716,8 @@ export class Game {
   private handleBossDefeated(): void {
     this.audio.play("victory");
     this.effects.domShake("heavy");
+    this.state.bossDefeated = true;
+    this.state.bossesDefeated++;
     // Trigger explosive feedback at boss position
     const boss = this.boss.getBoss();
     if (boss) {
@@ -440,18 +726,112 @@ export class Game {
       this.effects.killBurst(anchor, "#ffd060");
     }
     this.ui.hideBossBar();
+
+    // Endless Crypt: a defeated boss is a checkpoint, not the end of the run —
+    // keep descending until the final level. Only the last level ends the run.
+    const cfg = GAME_MODES[this.state.runMode];
+    if (this.state.runMode === "endlessCrypt") {
+      const level = this.state.encounterIndex + 1;
+      if (level < cfg.maxStages) {
+        window.setTimeout(() => {
+          this.parallax.setBossMode(false);
+          this.state.enemies = [];
+          this.enemyView.clear();
+          this.boss.reset();
+          this.bossEncounterStarted = false;
+          this.encounter.beginTransition();
+        }, 1400);
+        return;
+      }
+    }
     window.setTimeout(() => this.triggerVictory(), 1400);
   }
 
   // ---------- End game ----------
+
+  /**
+   * 40 Words completion: stop the clock, persist the result, and show the
+   * time-attack results screen. Called exactly once when the 40th word clears.
+   */
+  private completeFortyWords(): void {
+    this.state.mode = "results";
+    this.acceptingTypingInput = false;
+    this.stageIndicator.setVisible(false);
+    this.pauseMenu.setPauseButtonVisible(false);
+    this.audio.play("victory");
+    this.effects.domShake("medium");
+
+    const timeMs = this.state.getElapsedMs(this.state.timeAttackEndMs);
+    const wpm = this.state.getWpm(this.state.timeAttackEndMs);
+    const totalTyped = this.state.wordsTyped + this.state.mistakes;
+    const accuracy =
+      totalTyped > 0 ? (this.state.wordsTyped / totalTyped) * 100 : 100;
+
+    const { newRecord, bestTimeMs } = this.statsStore.recordFortyWords({
+      timeMs,
+      wpm,
+    });
+    this.statsStore.recordGlobalRun({
+      wordsTyped: this.state.wordsTyped,
+      enemiesDefeated: this.state.enemiesDefeated,
+      bossesDefeated: 0,
+      wpm,
+      playTimeMs: timeMs,
+    });
+
+    this.ui.showFortyWordsResults(
+      { timeMs, wpm, accuracy, bestTimeMs, newRecord },
+      () => this.startRun("fortyWords"),
+      () => this.exitToMenu(),
+    );
+  }
+
+  /** Persist lifetime + per-mode stats for a finished standard/endless run. */
+  private recordRunStats(completed: boolean): void {
+    if (this.statsRecorded) return;
+    this.statsRecorded = true;
+    const ref = this.state.runEndTime || performance.now();
+    const wpm = this.state.getWpm(ref);
+    const playTimeMs = this.state.getElapsedMs(ref);
+    this.statsStore.recordGlobalRun({
+      wordsTyped: this.state.wordsTyped,
+      enemiesDefeated: this.state.enemiesDefeated,
+      bossesDefeated: this.state.bossesDefeated,
+      wpm,
+      playTimeMs,
+    });
+    const stageReached = this.state.encounterIndex + 1;
+    if (this.state.runMode === "endlessCrypt") {
+      this.statsStore.recordEndless({
+        levelReached: stageReached,
+        bossesDefeated: this.state.bossesDefeated,
+        furthestBoss: Math.floor(stageReached / 5),
+        wpm,
+      });
+    } else if (this.state.runMode === "cursedCastleRun") {
+      this.statsStore.recordCastle({
+        stageReached,
+        wpm,
+        completed,
+        timeMs: completed ? playTimeMs : 0,
+      });
+    }
+  }
 
   private triggerVictory(): void {
     this.state.mode = "victory";
     this.state.runEndTime = performance.now();
     this.audio.play("victory");
     this.acceptingTypingInput = false;
+    this.stageIndicator.setVisible(false);
+    this.pauseMenu.setPauseButtonVisible(false);
+    this.recordRunStats(true);
     const stats = this.buildEndScreenStats(true);
-    this.ui.showEndScreen(stats, () => this.replay());
+    this.ui.showEndScreen(
+      stats,
+      () => this.replay(),
+      () => this.exitToMenu(),
+    );
   }
 
   private triggerDefeat(): void {
@@ -460,8 +840,15 @@ export class Game {
     this.audio.play("defeat");
     this.effects.domShake("heavy");
     this.acceptingTypingInput = false;
+    this.stageIndicator.setVisible(false);
+    this.pauseMenu.setPauseButtonVisible(false);
+    this.recordRunStats(false);
     const stats = this.buildEndScreenStats(false);
-    this.ui.showEndScreen(stats, () => this.replay());
+    this.ui.showEndScreen(
+      stats,
+      () => this.replay(),
+      () => this.exitToMenu(),
+    );
   }
 
   private buildEndScreenStats(victory: boolean): EndScreenStats {
@@ -490,18 +877,12 @@ export class Game {
         this.state.runEndTime > 0 && this.state.runStartTime > 0
           ? this.state.runEndTime - this.state.runStartTime
           : 0,
+      wpm: this.state.getWpm(this.state.runEndTime || performance.now()),
     };
   }
 
   private replay(): void {
-    this.ui.hideEndScreen();
-    this.boss.reset();
-    this.state.enemies = [];
-    this.enemyView.clear();
-    this.effects.clear();
-    this.ui.hideBossBar();
-    this.bossEncounterStarted = false;
-    this.startRun();
+    this.startRun(this.state.runMode);
   }
 }
 

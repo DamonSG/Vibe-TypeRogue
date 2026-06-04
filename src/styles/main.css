@@ -2,6 +2,7 @@
 @import "./cards.css";
 @import "./upgrades.css";
 @import "./endscreen.css";
+@import "./menus.css";
 
 :root {
   --bg-deep: #07050d;

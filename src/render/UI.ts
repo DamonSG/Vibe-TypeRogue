@@ -6,6 +6,8 @@ import type {
   UpgradeDef,
 } from "../types";
 import { TUNING } from "../data/tuning";
+import { formatClock, formatDurationShort } from "../data/format";
+import type { ModeType } from "../data/modes";
 import type { SceneRenderer } from "./SceneRenderer";
 import type { EnemyView } from "./EnemyView";
 import type { TypingSystem } from "../game/TypingSystem";
@@ -25,6 +27,25 @@ export interface EndScreenStats {
   buildId: string;
   shareLine: string;
   runDurationMs: number;
+  wpm: number;
+}
+
+/** Live HUD extras computed per-frame by Game (WPM / speed clock / progress). */
+export interface HudExtras {
+  wpm: number;
+  elapsedMs: number;
+  modeType: ModeType;
+  wordsCleared: number;
+  targetWords: number;
+}
+
+/** Results payload for the 40 Words completion screen. */
+export interface FortyWordsResult {
+  timeMs: number;
+  wpm: number;
+  accuracy: number;
+  bestTimeMs: number;
+  newRecord: boolean;
 }
 
 /**
@@ -40,9 +61,13 @@ export class UI {
   private shieldEl: HTMLElement;
   private comboEl: HTMLElement;
   private scoreEl: HTMLElement;
+  private wpmEl: HTMLElement;
   private buildBadgeEl: HTMLElement;
   private inputBar: HTMLElement;
   private cardsRoot: HTMLElement;
+  // Time-attack speed clock (top center, 40 Words only)
+  private timeClockEl: HTMLElement;
+  private countdownTimer: number | null = null;
   // Boss
   private bossBar: HTMLElement;
   private bossBarFill: HTMLElement;
@@ -57,7 +82,7 @@ export class UI {
     const r = document.getElementById("ui-root");
     if (!r) throw new Error("ui-root not found");
     this.root = r;
-    const { hud, hpFill, hpText, shield, combo, score, badge, input } =
+    const { hud, hpFill, hpText, shield, combo, score, wpm, badge, input } =
       this.buildHUD();
     this.hudEl = hud;
     this.hpBarFill = hpFill;
@@ -65,8 +90,10 @@ export class UI {
     this.shieldEl = shield;
     this.comboEl = combo;
     this.scoreEl = score;
+    this.wpmEl = wpm;
     this.buildBadgeEl = badge;
     this.inputBar = input;
+    this.timeClockEl = this.buildTimeClock();
     const { bar, fill, label, phase } = this.buildBossBar();
     this.bossBar = bar;
     this.bossBarFill = fill;
@@ -95,9 +122,20 @@ export class UI {
     enemyView: EnemyView,
     typing: TypingSystem,
     buildIdentity: string,
+    extras: HudExtras,
   ): void {
-    this.updateHUD(state, typing, buildIdentity);
+    this.updateHUD(state, typing, buildIdentity, extras);
     this.updateCards(state, renderer, enemyView, typing);
+  }
+
+  /** Hide combat-only overlays while non-gameplay menus are open. */
+  setGameplayVisible(visible: boolean): void {
+    this.hudEl.classList.toggle("hidden", !visible);
+    this.inputBar.classList.toggle("hidden", !visible);
+    this.cardsRoot.classList.toggle("hidden", !visible);
+    if (!visible) {
+      this.timeClockEl.classList.remove("visible");
+    }
   }
 
   private updateHUD(
@@ -110,6 +148,7 @@ export class UI {
     },
     typing: TypingSystem,
     buildIdentity: string,
+    extras: HudExtras,
   ): void {
     // HP
     const pct = Math.max(0, state.hp / Math.max(1, state.maxHp));
@@ -149,8 +188,21 @@ export class UI {
     this.lastCombo = combo;
     // Score
     this.scoreEl.textContent = state.score.toString().padStart(4, "0");
+    // WPM (secondary readout, all modes)
+    this.wpmEl.textContent = `WPM ${extras.wpm}`;
     // Build
     this.buildBadgeEl.textContent = buildIdentity;
+    // Time-attack speed clock + word progress (40 Words only)
+    if (extras.modeType === "timeAttack") {
+      this.timeClockEl.classList.add("visible");
+      const clock = this.timeClockEl.querySelector(".time-clock-value");
+      const progress = this.timeClockEl.querySelector(".time-clock-progress");
+      if (clock) clock.textContent = formatClock(extras.elapsedMs);
+      if (progress)
+        progress.textContent = `${extras.wordsCleared} / ${extras.targetWords} words`;
+    } else {
+      this.timeClockEl.classList.remove("visible");
+    }
     // Input bar
     const input = typing.getCurrentInput();
     if (input.length === 0) {
@@ -171,6 +223,7 @@ export class UI {
     const seen = new Set<string>();
     const bestTarget = typing.getBestTarget(state.enemies);
     const currentInput = typing.getCurrentInput();
+    const layouts: CardLayout[] = [];
 
     for (const e of state.enemies) {
       seen.add(e.id);
@@ -194,14 +247,25 @@ export class UI {
       const yOffset = e.cardAnchorSide === "top" ? "-100%" : "0";
       card.el.style.transform = `translate(-50%, ${yOffset}) scale(${depthScale})`;
       card.el.style.opacity = e.dying ? "0.6" : "1";
+      // Collect layout for the post-pass that nudges overlapping cards apart.
+      if (!e.dying) {
+        layouts.push({
+          card,
+          x: proj.x,
+          top: proj.y,
+          width: card.el.offsetWidth,
+          height: card.el.offsetHeight,
+          anchorTop: e.cardAnchorSide === "top",
+        });
+      }
       // Target highlight
       const isTarget = bestTarget?.id === e.id && currentInput.length > 0;
       card.el.classList.toggle("targeted", isTarget);
       // Mistake flash (set by CombatController via flashCard)
       // Update letter classes
       this.updateLetters(card, e, currentInput, isTarget);
-      // HP pips
-      this.updateHpPips(card, e);
+      // HP bar
+      this.updateHpBar(card, e);
       // Intent: damage value + numeric attack countdown
       const remainingMs = Math.max(0, e.def.attackTimerMs - e.attackTimer);
       card.dmgEl.textContent = `\u2694 ${e.def.damage}`;
@@ -212,12 +276,46 @@ export class UI {
         card.el.classList.add("dying");
       }
     }
+    this.resolveCardOverlap(layouts);
     // Remove cards for enemies that no longer exist
     for (const [id, card] of this.cards) {
       if (!seen.has(id)) {
         card.el.remove();
         this.cards.delete(id);
       }
+    }
+  }
+
+  /**
+   * Nudge horizontally-overlapping cards apart so adjacent word prompts stay
+   * readable. Only cards whose vertical bands intersect are pushed, so the
+   * top/bottom anchor alternation is preserved. Enemy sprites are untouched.
+   */
+  private resolveCardOverlap(layouts: CardLayout[]): void {
+    if (layouts.length < 2) return;
+    const GAP = 8;
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (let i = 0; i < layouts.length; i++) {
+        for (let j = i + 1; j < layouts.length; j++) {
+          const a = layouts[i];
+          const b = layouts[j];
+          if (!verticalBandsOverlap(a, b)) continue;
+          const minDist = (a.width + b.width) / 2 + GAP;
+          const dx = b.x - a.x;
+          const dist = Math.abs(dx);
+          if (dist >= minDist) continue;
+          const push = (minDist - dist) / 2;
+          const dir = dx === 0 ? (i % 2 === 0 ? 1 : -1) : Math.sign(dx);
+          a.x -= dir * push;
+          b.x += dir * push;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    for (const l of layouts) {
+      l.card.el.style.left = `${l.x}px`;
     }
   }
 
@@ -243,14 +341,11 @@ export class UI {
     }
   }
 
-  private updateHpPips(card: EnemyCardEl, enemy: Enemy): void {
-    // Show up to 5 pips representing HP fractions for clarity.
-    const pipCount = card.pips.length;
-    const filledRaw = (enemy.hp / enemy.maxHp) * pipCount;
-    for (let i = 0; i < pipCount; i++) {
-      const filled = i < Math.ceil(filledRaw);
-      card.pips[i].classList.toggle("full", filled);
-    }
+  private updateHpBar(card: EnemyCardEl, enemy: Enemy): void {
+    const pct = Math.max(0, Math.min(1, enemy.hp / Math.max(1, enemy.maxHp)));
+    card.hpFill.style.width = `${pct * 100}%`;
+    card.hpFill.classList.toggle("low", pct <= 0.3);
+    card.hpText.textContent = `${Math.max(0, Math.ceil(enemy.hp))} / ${enemy.maxHp}`;
   }
 
   /** Trigger a mistake flash animation on the enemy's card. */
@@ -434,7 +529,11 @@ export class UI {
 
   // ---------- End screen ----------
 
-  showEndScreen(stats: EndScreenStats, onReplay: () => void): void {
+  showEndScreen(
+    stats: EndScreenStats,
+    onReplay: () => void,
+    onMainMenu?: () => void,
+  ): void {
     this.hideEndScreen();
     const el = document.createElement("div");
     el.className = `end-screen ${stats.victory ? "victory" : "defeat"}`;
@@ -456,27 +555,116 @@ export class UI {
       <div class="build-id">Build · ${buildLine}</div>
       <div class="stats-grid">
         <div class="stat-row"><span class="stat-label">Accuracy</span><span class="stat-value ${stats.accuracy >= 90 ? "good" : stats.accuracy < 70 ? "bad" : ""}">${stats.accuracy.toFixed(1)}%</span></div>
+        <div class="stat-row"><span class="stat-label">WPM</span><span class="stat-value good">${stats.wpm}</span></div>
         <div class="stat-row"><span class="stat-label">Words Typed</span><span class="stat-value">${stats.wordsTyped}</span></div>
         <div class="stat-row"><span class="stat-label">Mistakes</span><span class="stat-value ${stats.mistakes > 30 ? "bad" : ""}">${stats.mistakes}</span></div>
         <div class="stat-row"><span class="stat-label">Highest Combo</span><span class="stat-value good">${stats.highestCombo}</span></div>
         <div class="stat-row"><span class="stat-label">Enemies Defeated</span><span class="stat-value">${stats.enemiesDefeated}</span></div>
         <div class="stat-row"><span class="stat-label">Damage Taken</span><span class="stat-value ${stats.damageTaken < 50 ? "good" : stats.damageTaken > 200 ? "bad" : ""}">${stats.damageTaken}</span></div>
-        <div class="stat-row"><span class="stat-label">Run Time</span><span class="stat-value">${formatDuration(stats.runDurationMs)}</span></div>
+        <div class="stat-row"><span class="stat-label">Run Time</span><span class="stat-value">${formatDurationShort(stats.runDurationMs)}</span></div>
         <div class="stat-row"><span class="stat-label">Outcome</span><span class="stat-value ${stats.victory ? "good" : "bad"}">${bossLine}</span></div>
       </div>
       <div class="share-line">${stats.shareLine}</div>
       <div class="actions">
         <button data-replay>Replay</button>
+        <button data-main-menu>Main Menu</button>
       </div>
     `;
     const btn = el.querySelector<HTMLButtonElement>("[data-replay]")!;
     btn.addEventListener("click", onReplay);
+    const menuBtn = el.querySelector<HTMLButtonElement>("[data-main-menu]")!;
+    if (onMainMenu) {
+      menuBtn.addEventListener("click", onMainMenu);
+    } else {
+      menuBtn.remove();
+    }
     this.root.appendChild(el);
   }
 
   hideEndScreen(): void {
     const el = this.root.querySelector('[data-end-screen="1"]');
     if (el) el.remove();
+  }
+
+  // ---------- Countdown (40 Words) ----------
+
+  /** Show a 3 - 2 - 1 - TYPE! countdown, calling onComplete at the end. */
+  showCountdown(onComplete: () => void): void {
+    this.hideCountdown();
+    const el = document.createElement("div");
+    el.className = "countdown-overlay";
+    el.dataset.countdown = "1";
+    const text = document.createElement("div");
+    text.className = "countdown-text";
+    el.appendChild(text);
+    this.root.appendChild(el);
+
+    const sequence = ["3", "2", "1", "TYPE!"];
+    let i = 0;
+    const step = () => {
+      if (i >= sequence.length) {
+        this.hideCountdown();
+        onComplete();
+        return;
+      }
+      text.textContent = sequence[i];
+      text.classList.toggle("go", sequence[i] === "TYPE!");
+      text.classList.remove("pulse");
+      void text.offsetWidth;
+      text.classList.add("pulse");
+      const isLast = i === sequence.length - 1;
+      i++;
+      this.countdownTimer = window.setTimeout(step, isLast ? 550 : 800);
+    };
+    step();
+  }
+
+  hideCountdown(): void {
+    if (this.countdownTimer !== null) {
+      window.clearTimeout(this.countdownTimer);
+      this.countdownTimer = null;
+    }
+    const el = this.root.querySelector('[data-countdown="1"]');
+    if (el) el.remove();
+  }
+
+  // ---------- 40 Words results ----------
+
+  showFortyWordsResults(
+    result: FortyWordsResult,
+    onRetry: () => void,
+    onBack: () => void,
+  ): void {
+    this.hideEndScreen();
+    const el = document.createElement("div");
+    el.className = "end-screen forty-results victory";
+    el.dataset.endScreen = "1";
+    const bestLine =
+      result.bestTimeMs > 0 ? formatClock(result.bestTimeMs) : "—";
+    el.innerHTML = `
+      <h1>40 Words</h1>
+      <div class="rank-title">Complete</div>
+      ${result.newRecord ? `<div class="new-record">New Record!</div>` : ""}
+      <div class="stats-grid forty">
+        <div class="stat-row"><span class="stat-label">Time</span><span class="stat-value good">${formatClock(result.timeMs)}</span></div>
+        <div class="stat-row"><span class="stat-label">WPM</span><span class="stat-value good">${result.wpm}</span></div>
+        <div class="stat-row"><span class="stat-label">Accuracy</span><span class="stat-value ${result.accuracy >= 90 ? "good" : result.accuracy < 70 ? "bad" : ""}">${result.accuracy.toFixed(1)}%</span></div>
+        <div class="stat-row"><span class="stat-label">Best</span><span class="stat-value">${bestLine}</span></div>
+      </div>
+      <div class="actions">
+        <button data-retry>Retry</button>
+        <button data-back>Back</button>
+      </div>
+    `;
+    el.querySelector<HTMLButtonElement>("[data-retry]")!.addEventListener(
+      "click",
+      onRetry,
+    );
+    el.querySelector<HTMLButtonElement>("[data-back]")!.addEventListener(
+      "click",
+      onBack,
+    );
+    this.root.appendChild(el);
   }
 
   // ---------- Builders ----------
@@ -488,6 +676,7 @@ export class UI {
     shield: HTMLElement;
     combo: HTMLElement;
     score: HTMLElement;
+    wpm: HTMLElement;
     badge: HTMLElement;
     input: HTMLElement;
   } {
@@ -505,6 +694,7 @@ export class UI {
         <div class="combo-display">—</div>
         <div class="hud-label" style="margin-top:8px;">Score</div>
         <div class="score-display">0000</div>
+        <div class="wpm-display">WPM 0</div>
         <div class="build-badge">No Build</div>
       </div>
     `;
@@ -520,9 +710,21 @@ export class UI {
       shield: hud.querySelector(".shield-indicator") as HTMLElement,
       combo: hud.querySelector(".combo-display") as HTMLElement,
       score: hud.querySelector(".score-display") as HTMLElement,
+      wpm: hud.querySelector(".wpm-display") as HTMLElement,
       badge: hud.querySelector(".build-badge") as HTMLElement,
       input,
     };
+  }
+
+  private buildTimeClock(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "time-clock";
+    el.innerHTML = `
+      <div class="time-clock-value">00:00.000</div>
+      <div class="time-clock-progress">0 / 40 words</div>
+    `;
+    this.root.appendChild(el);
+    return el;
   }
 
   private buildBossBar(): {
@@ -573,21 +775,17 @@ export class UI {
       letters.push(span);
     }
     el.appendChild(prompt);
-    // HP pips
-    const pipsRow = document.createElement("div");
-    pipsRow.className = "hp-pips";
-    const pipCount = Math.min(
-      6,
-      Math.max(3, Math.ceil(enemy.maxHp / 20)),
-    );
-    const pips: HTMLElement[] = [];
-    for (let i = 0; i < pipCount; i++) {
-      const p = document.createElement("div");
-      p.className = "pip full";
-      pipsRow.appendChild(p);
-      pips.push(p);
-    }
-    el.appendChild(pipsRow);
+    // Enemy HP bar: red fill + centered "cur / max" text, readable on dark bg.
+    const hpBar = document.createElement("div");
+    hpBar.className = "enemy-hp-bar";
+    const hpFill = document.createElement("div");
+    hpFill.className = "enemy-hp-fill";
+    const hpText = document.createElement("div");
+    hpText.className = "enemy-hp-text";
+    hpText.textContent = `${enemy.maxHp} / ${enemy.maxHp}`;
+    hpBar.appendChild(hpFill);
+    hpBar.appendChild(hpText);
+    el.appendChild(hpBar);
     // Intent row: damage + attack timer countdown (Slay-the-Spire style)
     const intent = document.createElement("div");
     intent.className = "intent";
@@ -604,7 +802,7 @@ export class UI {
     intent.appendChild(sep);
     intent.appendChild(timerEl);
     el.appendChild(intent);
-    return { el, prompt, letters, pips, dmgEl, timerEl, enemyId: enemy.id };
+    return { el, prompt, letters, hpFill, hpText, dmgEl, timerEl, enemyId: enemy.id };
   }
 
   /** Force a card to refresh its rendered prompt (when refreshOnSurvive triggers). */
@@ -638,15 +836,31 @@ interface EnemyCardEl {
   el: HTMLElement;
   prompt: HTMLElement;
   letters: HTMLElement[];
-  pips: HTMLElement[];
+  hpFill: HTMLElement;
+  hpText: HTMLElement;
   dmgEl: HTMLElement;
   timerEl: HTMLElement;
   enemyId: string;
 }
 
-function formatDuration(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+/** Per-frame card geometry used by the overlap-resolution pass. */
+interface CardLayout {
+  card: EnemyCardEl;
+  /** Card center x in screen pixels (mutated during resolution). */
+  x: number;
+  /** Anchor y in screen pixels. */
+  top: number;
+  width: number;
+  height: number;
+  /** True when the card sits above its anchor (translate -100%). */
+  anchorTop: boolean;
+}
+
+/** Whether two cards' vertical extents intersect (anchor-aware). */
+function verticalBandsOverlap(a: CardLayout, b: CardLayout): boolean {
+  const aTop = a.anchorTop ? a.top - a.height : a.top;
+  const aBottom = a.anchorTop ? a.top : a.top + a.height;
+  const bTop = b.anchorTop ? b.top - b.height : b.top;
+  const bBottom = b.anchorTop ? b.top : b.top + b.height;
+  return aTop < bBottom && bTop < aBottom;
 }

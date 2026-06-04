@@ -48,6 +48,7 @@ export class CombatSystem {
   ): CombatResult {
     // Pre-increment wordsTyped/perfectWords so hooks see updated state.
     this.state.wordsTyped++;
+    this.state.charsTyped += word.replace(/\s+/g, "").length;
     if (perfect) {
       this.state.perfectWords++;
       this.state.perfectWordsSinceBarrier++;
@@ -97,6 +98,11 @@ export class CombatSystem {
       baseDamage * ctx.damageMultiplier + ctx.flatBonusDamage,
     );
     if (finalDamage < 1) finalDamage = 1;
+
+    // One-shot modes (40 Words): any completed word instantly fells its enemy.
+    if (this.state.oneShotEnemies) {
+      finalDamage = Math.max(finalDamage, enemy.hp);
+    }
 
     // Apply damage to primary
     const killedPrimary = this.applyDamageToEnemy(enemy, finalDamage);

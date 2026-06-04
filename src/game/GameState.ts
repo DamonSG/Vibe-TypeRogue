@@ -6,6 +6,7 @@ import type {
   UpgradeDef,
   GameMode,
 } from "../types";
+import type { RunModeId } from "../data/modes";
 import { TUNING } from "../data/tuning";
 import { ENEMY_DEFS } from "../data/enemies";
 import {
@@ -37,10 +38,28 @@ export class GameState implements GameStateSnapshot {
 
   // --- Mode / flow
   mode: GameMode = "title";
+  /** Which game mode this run is using (drives stage source / win condition). */
+  runMode: RunModeId = "cursedCastleRun";
   runStartTime: number = 0;
   runEndTime: number = 0;
   bossDefeated: boolean = false;
   bossHpRemaining: number = 0;
+  /** Running count of bosses felled this run (Endless can defeat many). */
+  bossesDefeated: number = 0;
+
+  // --- Speed / WPM tracking
+  /** Total non-space characters in completed words — basis for WPM. */
+  charsTyped: number = 0;
+  /** Whether every completed word should instantly kill its enemy (40 Words). */
+  oneShotEnemies: boolean = false;
+
+  // --- Time-attack (40 Words) tracking
+  /** performance.now() when the first word appeared (timer start). */
+  timeAttackStartMs: number = 0;
+  /** performance.now() when the final word was cleared (timer stop). */
+  timeAttackEndMs: number = 0;
+  /** Words cleared in the current time-attack run. */
+  wordsCleared: number = 0;
 
   // --- Acquired upgrades
   ownedUpgrades: UpgradeDef[] = [];
@@ -74,9 +93,36 @@ export class GameState implements GameStateSnapshot {
     this.runEndTime = 0;
     this.bossDefeated = false;
     this.bossHpRemaining = 0;
+    this.bossesDefeated = 0;
+    this.charsTyped = 0;
+    this.oneShotEnemies = false;
+    this.timeAttackStartMs = 0;
+    this.timeAttackEndMs = 0;
+    this.wordsCleared = 0;
     this.ownedUpgrades = [];
     this.enemies = [];
     this.lastWordAt = 0;
+  }
+
+  /** Elapsed run time in ms (time-attack uses its own start/stop clock). */
+  getElapsedMs(now: number): number {
+    if (this.runMode === "fortyWords") {
+      if (this.timeAttackStartMs === 0) return 0;
+      const end = this.timeAttackEndMs > 0 ? this.timeAttackEndMs : now;
+      return Math.max(0, end - this.timeAttackStartMs);
+    }
+    if (this.runStartTime === 0) return 0;
+    const end = this.runEndTime > 0 ? this.runEndTime : now;
+    return Math.max(0, end - this.runStartTime);
+  }
+
+  /** Live words-per-minute: (chars / 5) per elapsed minute. */
+  getWpm(now: number): number {
+    const ms = this.getElapsedMs(now);
+    if (ms <= 0) return 0;
+    const minutes = ms / 60000;
+    if (minutes <= 0) return 0;
+    return Math.round(this.charsTyped / 5 / minutes);
   }
 
   /** Used by CombatSystem: check if an upgrade is owned. */

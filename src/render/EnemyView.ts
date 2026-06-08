@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Enemy, EnemyKind } from "../types";
+import type { Enemy } from "../types";
 import type { SceneRenderer } from "./SceneRenderer";
 import { TUNING } from "../data/tuning";
 
@@ -8,7 +8,7 @@ import { TUNING } from "../data/tuning";
  * Wider spacing keeps adjacent word cards from overlapping; the value stays
  * well inside the camera frustum at the enemies' depth.
  */
-const LANE_SPREAD = 4.6;
+const LANE_SPREAD = 5.8;
 
 /**
  * EnemyView builds and maintains the Three.js Sprite for each enemy. Procedural
@@ -166,9 +166,17 @@ export class EnemyView {
     const cacheKey = `${key}_${colorHint}`;
     let tex = this.textureCache.get(cacheKey);
     if (tex) return tex;
-    tex = buildEnemyTexture(key as EnemyKind, colorHint);
+    tex = buildEnemyTexture(key, colorHint);
     this.textureCache.set(cacheKey, tex);
     return tex;
+  }
+
+  /**
+   * Drop the cached sprite for an enemy so it is rebuilt next frame with its
+   * current def (used when a boss adopts its selected sprite key / color).
+   */
+  refreshSprite(enemyId: string): void {
+    this.remove(enemyId);
   }
 }
 
@@ -177,7 +185,7 @@ export class EnemyView {
  * with rim glow — a credible placeholder until CC0 art is swapped in.
  */
 function buildEnemyTexture(
-  kind: EnemyKind,
+  kind: string,
   colorHint: string,
 ): THREE.CanvasTexture {
   const c = document.createElement("canvas");
@@ -212,8 +220,17 @@ function buildEnemyTexture(
     case "elite":
       drawElite(ctx, colorHint);
       break;
+    case "glyph":
+      drawGlyph(ctx, colorHint);
+      break;
     case "boss":
       drawBoss(ctx, colorHint);
+      break;
+    case "bossWraith":
+      drawBossWraith(ctx, colorHint);
+      break;
+    case "bossGolem":
+      drawBossGolem(ctx, colorHint);
       break;
   }
 
@@ -480,6 +497,55 @@ function drawElite(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.fillRect(138, 310, 24, 70);
 }
 
+function drawGlyph(ctx: CanvasRenderingContext2D, color: string): void {
+  // A tiny, fragile floating wisp: a bright glowing core wrapped in a thin
+  // rune ring — reads clearly even at the glyph's small scale.
+  const cx = 128;
+  const cy = 200;
+
+  // Outer glow
+  const glow = ctx.createRadialGradient(cx, cy, 6, cx, cy, 92);
+  glow.addColorStop(0, hexToRgba(color, 0.95));
+  glow.addColorStop(0.4, hexToRgba(color, 0.5));
+  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 92, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Rune ring
+  ctx.strokeStyle = hexToRgba(color, 0.85);
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 54, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Tick marks around the ring
+  ctx.strokeStyle = hexToRgba("#ffffff", 0.7);
+  ctx.lineWidth = 4;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const x1 = cx + Math.cos(a) * 54;
+    const y1 = cy + Math.sin(a) * 54;
+    const x2 = cx + Math.cos(a) * 66;
+    const y2 = cy + Math.sin(a) * 66;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+
+  // Bright core
+  const core = ctx.createRadialGradient(cx, cy, 2, cx, cy, 34);
+  core.addColorStop(0, "#ffffff");
+  core.addColorStop(0.5, hexToRgba(color, 0.95));
+  core.addColorStop(1, hexToRgba(color, 0.1));
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 34, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawBoss(ctx: CanvasRenderingContext2D, color: string): void {
   // Huge shadow halo
   const halo = ctx.createRadialGradient(128, 220, 40, 128, 220, 180);
@@ -555,6 +621,146 @@ function drawBoss(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.fillRect(72, 250, 112, 14);
   ctx.fillStyle = "#ffd060";
   ctx.fillRect(120, 250, 16, 14);
+}
+
+function drawBossWraith(ctx: CanvasRenderingContext2D, color: string): void {
+  // Cold halo
+  const halo = ctx.createRadialGradient(128, 210, 30, 128, 210, 190);
+  halo.addColorStop(0, hexToRgba(color, 0.5));
+  halo.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = halo;
+  ctx.fillRect(0, 0, 256, 384);
+
+  // Tattered ghostly robe — wavy bottom edge
+  ctx.fillStyle = hexToRgba(color, 0.85);
+  ctx.beginPath();
+  ctx.moveTo(72, 120);
+  ctx.quadraticCurveTo(40, 220, 56, 340);
+  ctx.lineTo(78, 320);
+  ctx.lineTo(96, 350);
+  ctx.lineTo(118, 318);
+  ctx.lineTo(138, 352);
+  ctx.lineTo(160, 320);
+  ctx.lineTo(182, 346);
+  ctx.lineTo(200, 340);
+  ctx.quadraticCurveTo(216, 220, 184, 120);
+  ctx.quadraticCurveTo(128, 80, 72, 120);
+  ctx.closePath();
+  ctx.fill();
+
+  // Inner shroud shadow
+  ctx.fillStyle = darken(color, 0.35);
+  ctx.beginPath();
+  ctx.moveTo(98, 130);
+  ctx.quadraticCurveTo(80, 220, 100, 300);
+  ctx.lineTo(156, 300);
+  ctx.quadraticCurveTo(176, 220, 158, 130);
+  ctx.quadraticCurveTo(128, 108, 98, 130);
+  ctx.closePath();
+  ctx.fill();
+
+  // Hood
+  ctx.fillStyle = darken(color, 0.5);
+  ctx.beginPath();
+  ctx.moveTo(86, 132);
+  ctx.quadraticCurveTo(128, 58, 170, 132);
+  ctx.quadraticCurveTo(128, 110, 86, 132);
+  ctx.closePath();
+  ctx.fill();
+
+  // Glowing eyes
+  ctx.fillStyle = "#eafcff";
+  ctx.beginPath();
+  ctx.ellipse(112, 116, 7, 10, 0, 0, Math.PI * 2);
+  ctx.ellipse(144, 116, 7, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = hexToRgba(color, 0.9);
+  ctx.beginPath();
+  ctx.arc(112, 116, 13, 0, Math.PI * 2);
+  ctx.arc(144, 116, 13, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wispy claw hands
+  ctx.strokeStyle = "#eafcff";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  for (const hx of [70, 186]) {
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(hx, 220);
+      ctx.lineTo(hx + i * 10, 268);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawBossGolem(ctx: CanvasRenderingContext2D, color: string): void {
+  // Earthy halo
+  const halo = ctx.createRadialGradient(128, 230, 40, 128, 230, 190);
+  halo.addColorStop(0, hexToRgba(color, 0.45));
+  halo.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = halo;
+  ctx.fillRect(0, 0, 256, 384);
+
+  // Massive blocky legs
+  ctx.fillStyle = darken(color, 0.55);
+  ctx.fillRect(78, 290, 40, 70);
+  ctx.fillRect(138, 290, 40, 70);
+
+  // Hulking torso (trapezoid of stacked stone)
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(60, 300);
+  ctx.lineTo(72, 150);
+  ctx.lineTo(184, 150);
+  ctx.lineTo(196, 300);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cracked plating seams
+  ctx.strokeStyle = darken(color, 0.4);
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(72, 200);
+  ctx.lineTo(186, 200);
+  ctx.moveTo(78, 250);
+  ctx.lineTo(182, 250);
+  ctx.moveTo(128, 150);
+  ctx.lineTo(128, 300);
+  ctx.stroke();
+
+  // Glowing rune cracks
+  ctx.strokeStyle = "#ffce6b";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(100, 210);
+  ctx.lineTo(116, 230);
+  ctx.lineTo(104, 248);
+  ctx.moveTo(150, 208);
+  ctx.lineTo(140, 232);
+  ctx.lineTo(158, 250);
+  ctx.stroke();
+
+  // Boulder shoulders
+  ctx.fillStyle = darken(color, 0.3);
+  ctx.beginPath();
+  ctx.arc(66, 158, 34, 0, Math.PI * 2);
+  ctx.arc(190, 158, 34, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Heavy fists
+  ctx.beginPath();
+  ctx.arc(54, 268, 26, 0, Math.PI * 2);
+  ctx.arc(202, 268, 26, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Squat head
+  ctx.fillStyle = darken(color, 0.45);
+  ctx.fillRect(98, 96, 60, 56);
+  // Burning eyes
+  ctx.fillStyle = "#ffce6b";
+  ctx.fillRect(108, 118, 14, 10);
+  ctx.fillRect(134, 118, 14, 10);
 }
 
 // ---------- color helpers ----------

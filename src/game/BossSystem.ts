@@ -1,6 +1,11 @@
-import type { BossPhaseDef, Enemy } from "../types";
-import { CURSED_KNIGHT } from "../data/boss";
+import type { BossDef, BossPhaseDef, Enemy, EnemyKind } from "../types";
+import { BOSS_REGISTRY } from "../data/bosses";
 import { GameState, spawnEnemy, setEnemyPrompt, pickFreshPrompt } from "./GameState";
+import {
+  createGimmick,
+  type BossGimmick,
+  type BossGimmickContext,
+} from "./boss/gimmicks";
 
 export interface BossCallbacks {
   onPhaseChange(phase: BossPhaseDef): void;
@@ -9,10 +14,12 @@ export interface BossCallbacks {
 }
 
 /**
- * BossSystem manages the Cursed Knight: phase progression, prompt pool,
- * summons. Operates on the boss Enemy (kind === 'boss') currently in state.enemies.
+ * BossSystem manages whichever boss is currently active: selection from the
+ * registry, phase progression, the prompt pool, summons, and a modular gimmick
+ * layer. Operates on the boss Enemy (kind === 'boss') currently in state.enemies.
  */
 export class BossSystem {
+  private def: BossDef = BOSS_REGISTRY[0];
   private bossEnemy: Enemy | null = null;
   private currentPhaseIndex = 0;
   private summonTimer = 0;
@@ -20,39 +27,100 @@ export class BossSystem {
   private scale = 1;
   active = false;
 
+  /** Boss-wide gimmick instances (whole fight). */
+  private bossGimmicks: BossGimmick[] = [];
+  /** Gimmick instances scoped to the current phase. */
+  private phaseGimmicks: BossGimmick[] = [];
+  /** Ids of bosses already used this run (for no-repeat random selection). */
+  private usedBossIds = new Set<string>();
+  /** Lazily-built context shared with gimmicks. */
+  private gimmickCtx: BossGimmickContext | null = null;
+
   constructor(
     private state: GameState,
     private cbs: BossCallbacks,
   ) {}
 
+  /** Full reset for a brand new run — also forgets which bosses were used. */
   reset(): void {
+    this.clearForNextBoss();
+    this.usedBossIds.clear();
+  }
+
+  /** Per-fight teardown that preserves run-level no-repeat tracking. */
+  clearForNextBoss(): void {
     this.bossEnemy = null;
     this.currentPhaseIndex = 0;
     this.summonTimer = 0;
     this.scale = 1;
     this.active = false;
+    this.bossGimmicks = [];
+    this.phaseGimmicks = [];
+    this.gimmickCtx = null;
+    this.state.bossDamageModifier = undefined;
+  }
+
+  /**
+   * Pick the next boss def at random, avoiding ids already used this run. When
+   * every boss has been seen, the pool resets so long runs keep cycling.
+   */
+  selectBoss(): BossDef {
+    let pool = BOSS_REGISTRY.filter((b) => !this.usedBossIds.has(b.id));
+    if (pool.length === 0) {
+      this.usedBossIds.clear();
+      pool = [...BOSS_REGISTRY];
+    }
+    const def = pool[Math.floor(Math.random() * pool.length)];
+    this.usedBossIds.add(def.id);
+    return def;
+  }
+
+  /** Which boss is currently bound. */
+  getDef(): BossDef {
+    return this.def;
   }
 
   /** Bind to the boss enemy spawned by the encounter. */
   bindBoss(scale = 1): void {
     const boss = this.state.enemies.find((e) => e.def.kind === "boss" && e.alive);
     if (!boss) return;
+    this.def = this.selectBoss();
     this.bossEnemy = boss;
     this.currentPhaseIndex = 0;
     this.summonTimer = 0;
     this.scale = Math.max(1, scale);
     this.active = true;
-    const phase0 = CURSED_KNIGHT.phases[0];
+
+    // Detach this boss enemy's def from the shared ENEMY_DEFS.boss singleton so
+    // per-fight overrides never leak across bosses, then apply the selected
+    // boss's identity + visuals.
+    boss.def = { ...boss.def };
+    boss.def.displayName = this.def.displayName;
+    boss.def.spriteKey = this.def.spriteKey;
+    boss.def.scale = this.def.scale;
+    if (this.def.colorHint) {
+      boss.def.colorHint = this.def.colorHint;
+      boss.colorHint = this.def.colorHint;
+    }
+
+    const phase0 = this.def.phases[0];
     // Override boss HP from def with the proper (scaled) number
-    boss.hp = Math.round(CURSED_KNIGHT.hp * this.scale);
-    boss.maxHp = Math.round(CURSED_KNIGHT.hp * this.scale);
+    boss.hp = Math.round(this.def.hp * this.scale);
+    boss.maxHp = Math.round(this.def.hp * this.scale);
     // Apply phase 0 cadence + prompts
     boss.def.attackTimerMs = phase0.attackTimerMs;
     boss.def.damage = Math.round(phase0.damage * this.scale);
     setEnemyPrompt(boss, pickFreshPrompt(phase0.promptPool));
+
+    // Build gimmicks + wire the damage modifier.
+    this.gimmickCtx = this.buildContext(boss);
+    this.bossGimmicks = this.instantiate(this.def.gimmicks);
+    this.phaseGimmicks = this.instantiate(phase0.gimmicks);
+    for (const g of this.allGimmicks()) g.onBind?.(this.gimmickCtx);
+    this.state.bossDamageModifier = (dmg) => this.applyDamageModifiers(dmg);
   }
 
-  /** Update boss state — handles phase transitions and summons. */
+  /** Update boss state — handles phase transitions, summons, and gimmicks. */
   update(deltaMs: number, spawnFn: (id: string) => void): void {
     if (!this.active || !this.bossEnemy) return;
     const boss = this.bossEnemy;
@@ -60,6 +128,9 @@ export class BossSystem {
       this.active = false;
       this.state.bossDefeated = true;
       this.state.bossHpRemaining = 0;
+      const ctx = this.gimmickCtx;
+      if (ctx) for (const g of this.allGimmicks()) g.onBossDefeated?.(ctx);
+      this.state.bossDamageModifier = undefined;
       this.cbs.onBossDefeated();
       return;
     }
@@ -68,20 +139,32 @@ export class BossSystem {
 
     // Check phase transition
     while (
-      this.currentPhaseIndex < CURSED_KNIGHT.phases.length - 1 &&
-      fraction <= CURSED_KNIGHT.phases[this.currentPhaseIndex].endsAtHpFraction
+      this.currentPhaseIndex < this.def.phases.length - 1 &&
+      fraction <= this.def.phases[this.currentPhaseIndex].endsAtHpFraction
     ) {
       this.currentPhaseIndex++;
-      const newPhase = CURSED_KNIGHT.phases[this.currentPhaseIndex];
+      const newPhase = this.def.phases[this.currentPhaseIndex];
       boss.def.attackTimerMs = newPhase.attackTimerMs;
       boss.def.damage = Math.round(newPhase.damage * this.scale);
       this.summonTimer = 0;
       // Set new prompt from phase pool
       setEnemyPrompt(boss, pickFreshPrompt(newPhase.promptPool));
+      // Swap in this phase's gimmicks and notify everyone of the transition.
+      this.phaseGimmicks = this.instantiate(newPhase.gimmicks);
+      if (this.gimmickCtx) {
+        for (const g of this.phaseGimmicks) g.onBind?.(this.gimmickCtx);
+        for (const g of this.allGimmicks())
+          g.onPhaseEnter?.(this.gimmickCtx, newPhase);
+      }
       this.cbs.onPhaseChange(newPhase);
     }
 
-    const phase = CURSED_KNIGHT.phases[this.currentPhaseIndex];
+    const phase = this.def.phases[this.currentPhaseIndex];
+
+    // Gimmick per-frame updates (may alter cadence, spawn weak points, etc.)
+    if (this.gimmickCtx) {
+      for (const g of this.allGimmicks()) g.onUpdate?.(this.gimmickCtx, deltaMs);
+    }
 
     // Summons
     if (phase.summon) {
@@ -110,13 +193,29 @@ export class BossSystem {
   /** Called after boss survives a word completion. Refresh from phase pool. */
   refreshBossPrompt(): void {
     if (!this.bossEnemy || !this.active) return;
-    const phase = CURSED_KNIGHT.phases[this.currentPhaseIndex];
-    setEnemyPrompt(this.bossEnemy, pickFreshPrompt(phase.promptPool));
+    const phase = this.def.phases[this.currentPhaseIndex];
+    setEnemyPrompt(
+      this.bossEnemy,
+      pickFreshPrompt(phase.promptPool, this.bossEnemy.promptDisplay),
+    );
+  }
+
+  /** Notify gimmicks that the player completed the boss's word. */
+  notifyBossWordComplete(perfect: boolean, killed: boolean): void {
+    if (!this.active || !this.gimmickCtx) return;
+    for (const g of this.allGimmicks())
+      g.onBossWordComplete?.(this.gimmickCtx, perfect, killed);
+  }
+
+  /** Notify gimmicks that the player mistyped against the boss. */
+  notifyMistake(): void {
+    if (!this.active || !this.gimmickCtx) return;
+    for (const g of this.allGimmicks()) g.onPlayerMistake?.(this.gimmickCtx);
   }
 
   getCurrentPhase(): BossPhaseDef | null {
     if (!this.active) return null;
-    return CURSED_KNIGHT.phases[this.currentPhaseIndex];
+    return this.def.phases[this.currentPhaseIndex];
   }
 
   getBoss(): Enemy | null {
@@ -124,6 +223,58 @@ export class BossSystem {
   }
 
   totalPhases(): number {
-    return CURSED_KNIGHT.phases.length;
+    return this.def.phases.length;
+  }
+
+  // ---------- Internals ----------
+
+  private allGimmicks(): BossGimmick[] {
+    return [...this.bossGimmicks, ...this.phaseGimmicks];
+  }
+
+  private instantiate(
+    configs: BossDef["gimmicks"] | BossPhaseDef["gimmicks"],
+  ): BossGimmick[] {
+    if (!configs) return [];
+    const out: BossGimmick[] = [];
+    for (const c of configs) {
+      const g = createGimmick(c.id, c.params ?? {});
+      if (g) out.push(g);
+    }
+    return out;
+  }
+
+  private applyDamageModifiers(dmg: number): number {
+    const ctx = this.gimmickCtx;
+    if (!ctx) return dmg;
+    let d = dmg;
+    for (const g of this.allGimmicks()) {
+      if (g.modifyBossDamage) d = g.modifyBossDamage(d, ctx);
+    }
+    return d;
+  }
+
+  private buildContext(boss: Enemy): BossGimmickContext {
+    return {
+      state: this.state,
+      boss,
+      getPhase: () => this.def.phases[this.currentPhaseIndex],
+      spawnWeakPoint: (kind: EnemyKind, opts) => {
+        const minion = spawnEnemy(this.state, kind, {
+          laneX: opts?.laneX ?? (Math.random() - 0.5) * 1.5,
+          depth: opts?.depth ?? 0.95,
+          promptOverride: opts?.promptOverride,
+        });
+        minion.bossLinked = true;
+        this.state.enemies.push(minion);
+        this.cbs.onSummon(minion.id);
+        return minion.id;
+      },
+      aliveWeakPoints: () =>
+        this.state.enemies.filter(
+          (e) => e.bossLinked && e.alive && !e.dying,
+        ).length,
+      refreshBossPrompt: () => this.refreshBossPrompt(),
+    };
   }
 }

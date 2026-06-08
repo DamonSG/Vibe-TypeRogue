@@ -55,6 +55,7 @@
 
 /* Main menu */
 .main-menu-content {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -323,6 +324,212 @@ button.mode-card:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Toggle row (label + On/Off button) */
+.settings-row-toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-toggle {
+  min-width: 72px;
+  font-family: var(--font-game);
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: rgba(24, 16, 34, 0.85);
+  border: 1px solid rgba(244, 236, 216, 0.25);
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition:
+    border-color 140ms,
+    background 140ms,
+    color 140ms;
+}
+.settings-toggle:hover {
+  border-color: var(--accent);
+}
+.settings-toggle.active {
+  border-color: rgba(233, 196, 106, 0.6);
+  color: var(--accent);
+  background: rgba(40, 28, 12, 0.9);
+  text-shadow: 0 0 8px rgba(233, 196, 106, 0.4);
+}
+
+/* Select dropdown (song picker, etc.) */
+.settings-select {
+  font-family: var(--font-game);
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--ink);
+  background: rgba(24, 16, 34, 0.85);
+  border: 1px solid rgba(244, 236, 216, 0.25);
+  border-radius: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 140ms,
+    background 140ms;
+  width: 100%;
+}
+.settings-select:hover,
+.settings-select:focus {
+  border-color: var(--accent);
+  background: rgba(40, 28, 12, 0.9);
+}
+.settings-select option {
+  background: #0e0916;
+  color: var(--ink);
+}
+
+/* Song picker row on main menu */
+.menu-song-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 280px;
+  margin-top: 8px;
+}
+.menu-song-label {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.menu-music-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Music playlist (checkbox list + custom tracks) */
+.music-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.music-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: rgba(24, 16, 34, 0.7);
+  border: 1px solid rgba(244, 236, 216, 0.18);
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    border-color 140ms,
+    background 140ms;
+}
+.music-row:hover {
+  border-color: rgba(233, 196, 106, 0.5);
+}
+.music-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.music-name {
+  flex: 1 1 auto;
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.music-remove {
+  flex: 0 0 auto;
+  font-family: var(--font-game);
+  font-size: 12px;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid rgba(244, 236, 216, 0.2);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  transition:
+    color 140ms,
+    border-color 140ms;
+}
+.music-remove:hover {
+  color: var(--boss);
+  border-color: var(--boss);
+}
+
+/* Add-custom-track controls */
+.music-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(244, 236, 216, 0.18);
+}
+.music-add-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.music-add-url {
+  display: flex;
+  gap: 6px;
+}
+.music-url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-game);
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(24, 16, 34, 0.85);
+  border: 1px solid rgba(244, 236, 216, 0.25);
+  border-radius: 4px;
+  padding: 7px 10px;
+  outline: none;
+}
+.music-url-input:focus {
+  border-color: var(--accent);
+}
+.music-add-btn,
+.music-file-btn {
+  flex: 0 0 auto;
+  font-family: var(--font-game);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--ink);
+  background: rgba(24, 16, 34, 0.85);
+  border: 1px solid rgba(244, 236, 216, 0.25);
+  border-radius: 4px;
+  padding: 7px 12px;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 140ms,
+    background 140ms;
+}
+.music-add-btn:hover:not(:disabled),
+.music-file-btn:hover:not(.disabled) {
+  border-color: var(--accent);
+  background: rgba(40, 28, 12, 0.9);
+}
+.music-add-btn:disabled,
+.music-file-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.music-add-error {
+  font-size: 11px;
+  color: var(--boss);
+  min-height: 14px;
+}
+
 /* Confirm dialog (over pause menu) */
 .confirm-dialog {
   z-index: 70;
@@ -363,11 +570,21 @@ button.mode-card:hover {
   min-width: 110px;
 }
 
-/* Top-right pause button */
-.pause-button {
+/* Top-right pause group (mute btns + pause icon) */
+.pause-group {
   position: absolute;
   top: 16px;
   right: 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  z-index: 40;
+}
+.pause-group.hidden {
+  display: none;
+}
+
+.pause-button {
   width: 40px;
   height: 40px;
   display: flex;
@@ -378,7 +595,6 @@ button.mode-card:hover {
   border-radius: 4px;
   cursor: pointer;
   pointer-events: auto;
-  z-index: 40;
   transition:
     border-color 140ms,
     background 140ms;
@@ -386,9 +602,6 @@ button.mode-card:hover {
 .pause-button:hover {
   border-color: var(--accent);
   background: rgba(40, 28, 12, 0.85);
-}
-.pause-button.hidden {
-  display: none;
 }
 .pause-icon,
 .pause-icon::after {
@@ -412,6 +625,60 @@ button.mode-card:hover {
   background: var(--accent);
 }
 
+/* Mute buttons (used in menu top-right and in-game next to pause) */
+.mute-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(7, 5, 13, 0.6);
+  border: 1px solid rgba(244, 236, 216, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    border-color 140ms,
+    background 140ms,
+    opacity 140ms;
+  padding: 6px 10px;
+  font-size: 14px;
+  line-height: 1;
+}
+.mute-btn.ingame {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+.mute-btn:hover {
+  border-color: var(--accent);
+  background: rgba(40, 28, 12, 0.85);
+}
+.mute-btn.muted {
+  opacity: 0.5;
+  border-color: rgba(182, 49, 74, 0.5);
+}
+.mute-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.mute-label {
+  font-family: var(--font-game);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Mute buttons on the main menu (positioned top-right of content) */
+.menu-mute-buttons {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
 /* Stage progression indicator (above the input bar) */
 .stage-indicator {
   position: absolute;
@@ -430,6 +697,35 @@ button.mode-card:hover {
 }
 .stage-indicator.hidden {
   display: none;
+}
+/* Side variant: enlarged vertical column anchored to the right edge
+   (Cursed Castle Run + Endless Crypt) for clearer run progress. */
+.stage-indicator.side {
+  left: auto;
+  right: 22px;
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px;
+  max-height: 94vh;
+}
+.stage-indicator.side .stage-node {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.stage-indicator.side .stage-label {
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.stage-indicator.side .stage-link {
+  width: 0;
+  height: 7px;
+  border-top: none;
+  border-left: 1px dashed rgba(244, 236, 216, 0.25);
 }
 /* 40 Words readout variant (replaces stage tiles) */
 .stage-indicator.readout-mode {

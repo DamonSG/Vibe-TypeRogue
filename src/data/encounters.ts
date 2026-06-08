@@ -1,8 +1,26 @@
 import type { EncounterDef } from "../types";
 
+/** A boss-stage encounter. The actual boss is chosen at runtime by BossSystem. */
+function bossEncounter(name: string, subtitle: string): EncounterDef {
+  return {
+    id: "boss",
+    name,
+    subtitle,
+    ambient: "boss",
+    rewardUpgrade: false,
+    waves: [
+      {
+        delayMs: 600,
+        spawns: [{ kind: "boss", laneX: 0.0, startDepth: 1.0 }],
+      },
+    ],
+  };
+}
+
 /**
- * Cursed Castle Run — a curated 10-stage descent. Stages 1-9 are fights (with
- * an elite gauntlet around the midpoint), and stage 10 is the Cursed Knight.
+ * Cursed Castle Run — a curated 15-stage descent. A boss guards every fifth
+ * stage (5, 10, 15); the others are fights, with an elite gauntlet sprinkled in.
+ * The specific boss at each boss stage is selected at random by BossSystem.
  */
 export const CASTLE_ENCOUNTERS: EncounterDef[] = [
   {
@@ -13,18 +31,19 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 600,
+        delayMs: 300,
         spawns: [
           { kind: "skeleton", laneX: -0.55, startDepth: 0.9 },
-          { kind: "skeleton", laneX: 0.55, startDepth: 0.95, delayMs: 600 },
+          { kind: "skeleton", laneX: 0.55, startDepth: 0.95, delayMs: 300 },
         ],
       },
       {
-        delayMs: 1200,
+        delayMs: 600,
         spawns: [
           { kind: "skeleton", laneX: 0.0, startDepth: 1.0 },
-          { kind: "ghoul", laneX: -0.65, startDepth: 0.85, delayMs: 500 },
-          { kind: "ghoul", laneX: 0.65, startDepth: 0.85, delayMs: 900 },
+          { kind: "ghoul", laneX: -0.65, startDepth: 0.85, delayMs: 250 },
+          { kind: "ghoul", laneX: 0.65, startDepth: 0.85, delayMs: 450 },
+          { kind: "glyph", laneX: 0.9, startDepth: 0.7, delayMs: 700 },
         ],
       },
     ],
@@ -37,19 +56,19 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 600,
+        delayMs: 300,
         spawns: [
           { kind: "ghoul", laneX: -0.7, startDepth: 0.9 },
-          { kind: "ghoul", laneX: 0.7, startDepth: 0.9, delayMs: 300 },
-          { kind: "guard", laneX: 0.0, startDepth: 1.0, delayMs: 800 },
+          { kind: "ghoul", laneX: 0.7, startDepth: 0.9, delayMs: 150 },
+          { kind: "guard", laneX: 0.0, startDepth: 1.0, delayMs: 400 },
         ],
       },
       {
-        delayMs: 1200,
+        delayMs: 600,
         spawns: [
           { kind: "skeleton", laneX: -0.8, startDepth: 0.85 },
-          { kind: "skeleton", laneX: 0.8, startDepth: 0.85, delayMs: 200 },
-          { kind: "ghost", laneX: 0.0, startDepth: 1.0, delayMs: 1000 },
+          { kind: "skeleton", laneX: 0.8, startDepth: 0.85, delayMs: 100 },
+          { kind: "ghost", laneX: 0.0, startDepth: 1.0, delayMs: 500 },
         ],
       },
     ],
@@ -62,18 +81,20 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 700,
+        delayMs: 350,
         spawns: [
           { kind: "ghoul", laneX: -0.6, startDepth: 0.9 },
-          { kind: "ghost", laneX: 0.6, startDepth: 0.95, delayMs: 400 },
-          { kind: "skeleton", laneX: 0.0, startDepth: 1.0, delayMs: 900 },
+          { kind: "ghost", laneX: 0.6, startDepth: 0.95, delayMs: 200 },
+          { kind: "skeleton", laneX: 0.0, startDepth: 1.0, delayMs: 450 },
         ],
       },
       {
-        delayMs: 1200,
+        delayMs: 600,
         spawns: [
           { kind: "guard", laneX: -0.55, startDepth: 0.9 },
-          { kind: "ghoul", laneX: 0.7, startDepth: 0.85, delayMs: 600 },
+          { kind: "ghoul", laneX: 0.7, startDepth: 0.85, delayMs: 300 },
+          { kind: "glyph", laneX: -0.9, startDepth: 0.65, delayMs: 200 },
+          { kind: "glyph", laneX: 0.95, startDepth: 0.7, delayMs: 550 },
         ],
       },
     ],
@@ -86,16 +107,17 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 600,
+        delayMs: 300,
         spawns: [
-          { kind: "skeleton", laneX: -0.75, startDepth: 0.9 },
-          { kind: "skeleton", laneX: 0.0, startDepth: 0.95, delayMs: 300 },
-          { kind: "skeleton", laneX: 0.75, startDepth: 0.9, delayMs: 600 },
-          { kind: "caster", laneX: 0.0, startDepth: 1.1, delayMs: 1200 },
+          { kind: "skeleton", laneX: -0.85, startDepth: 0.85 },
+          { kind: "skeleton", laneX: -0.28, startDepth: 0.95, delayMs: 150 },
+          { kind: "skeleton", laneX: 0.85, startDepth: 0.85, delayMs: 300 },
+          { kind: "caster", laneX: 0.3, startDepth: 1.25, delayMs: 600 },
         ],
       },
     ],
   },
+  bossEncounter("The First Seal", "Something ancient bars the descent"),
   {
     id: "elite",
     name: "The Iron Watch",
@@ -104,11 +126,11 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 1000,
+        delayMs: 500,
         spawns: [
           { kind: "elite", laneX: 0.0, startDepth: 1.0 },
-          { kind: "skeleton", laneX: -0.7, startDepth: 0.9, delayMs: 800 },
-          { kind: "skeleton", laneX: 0.7, startDepth: 0.9, delayMs: 1200 },
+          { kind: "skeleton", laneX: -0.7, startDepth: 0.9, delayMs: 400 },
+          { kind: "skeleton", laneX: 0.7, startDepth: 0.9, delayMs: 600 },
         ],
       },
     ],
@@ -121,19 +143,21 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 700,
+        delayMs: 350,
         spawns: [
           { kind: "ghost", laneX: -0.7, startDepth: 0.9 },
-          { kind: "ghost", laneX: 0.7, startDepth: 0.9, delayMs: 400 },
-          { kind: "caster", laneX: 0.0, startDepth: 1.05, delayMs: 1000 },
+          { kind: "ghost", laneX: 0.7, startDepth: 0.9, delayMs: 200 },
+          { kind: "caster", laneX: 0.0, startDepth: 1.05, delayMs: 500 },
+          { kind: "glyph", laneX: -0.95, startDepth: 0.6, delayMs: 350 },
+          { kind: "glyph", laneX: 0.95, startDepth: 0.6, delayMs: 650 },
         ],
       },
       {
-        delayMs: 1400,
+        delayMs: 700,
         spawns: [
           { kind: "ghoul", laneX: -0.8, startDepth: 0.8 },
-          { kind: "guard", laneX: 0.0, startDepth: 1.0, delayMs: 600 },
-          { kind: "caster", laneX: 0.8, startDepth: 1.0, delayMs: 1100 },
+          { kind: "guard", laneX: 0.0, startDepth: 1.0, delayMs: 300 },
+          { kind: "caster", laneX: 0.8, startDepth: 1.0, delayMs: 550 },
         ],
       },
     ],
@@ -146,18 +170,18 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 700,
+        delayMs: 350,
         spawns: [
           { kind: "guard", laneX: -0.7, startDepth: 0.9 },
-          { kind: "guard", laneX: 0.7, startDepth: 0.9, delayMs: 500 },
+          { kind: "guard", laneX: 0.7, startDepth: 0.9, delayMs: 250 },
         ],
       },
       {
-        delayMs: 1300,
+        delayMs: 650,
         spawns: [
           { kind: "ghoul", laneX: -0.6, startDepth: 0.85 },
-          { kind: "ghost", laneX: 0.6, startDepth: 0.95, delayMs: 400 },
-          { kind: "caster", laneX: 0.0, startDepth: 1.1, delayMs: 900 },
+          { kind: "ghost", laneX: 0.6, startDepth: 0.95, delayMs: 200 },
+          { kind: "caster", laneX: 0.0, startDepth: 1.1, delayMs: 450 },
         ],
       },
     ],
@@ -170,22 +194,23 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 700,
+        delayMs: 350,
         spawns: [
           { kind: "ghost", laneX: -0.8, startDepth: 0.9 },
-          { kind: "ghost", laneX: 0.0, startDepth: 0.95, delayMs: 350 },
-          { kind: "ghost", laneX: 0.8, startDepth: 0.9, delayMs: 700 },
+          { kind: "ghost", laneX: 0.0, startDepth: 0.95, delayMs: 200 },
+          { kind: "ghost", laneX: 0.8, startDepth: 0.9, delayMs: 350 },
         ],
       },
       {
-        delayMs: 1400,
+        delayMs: 700,
         spawns: [
           { kind: "caster", laneX: -0.5, startDepth: 1.0 },
-          { kind: "caster", laneX: 0.5, startDepth: 1.0, delayMs: 600 },
+          { kind: "caster", laneX: 0.5, startDepth: 1.0, delayMs: 300 },
         ],
       },
     ],
   },
+  bossEncounter("The Second Seal", "A deeper guardian awakens"),
   {
     id: "enc9",
     name: "The Throne Approach",
@@ -194,35 +219,98 @@ export const CASTLE_ENCOUNTERS: EncounterDef[] = [
     rewardUpgrade: true,
     waves: [
       {
-        delayMs: 900,
+        delayMs: 450,
         spawns: [
           { kind: "elite", laneX: 0.0, startDepth: 1.0 },
-          { kind: "ghoul", laneX: -0.75, startDepth: 0.85, delayMs: 700 },
-          { kind: "ghoul", laneX: 0.75, startDepth: 0.85, delayMs: 1000 },
+          { kind: "ghoul", laneX: -0.75, startDepth: 0.85, delayMs: 350 },
+          { kind: "ghoul", laneX: 0.75, startDepth: 0.85, delayMs: 500 },
         ],
       },
       {
-        delayMs: 1400,
+        delayMs: 700,
         spawns: [
           { kind: "guard", laneX: -0.55, startDepth: 0.95 },
-          { kind: "caster", laneX: 0.55, startDepth: 1.05, delayMs: 500 },
+          { kind: "caster", laneX: 0.55, startDepth: 1.05, delayMs: 250 },
         ],
       },
     ],
   },
   {
-    id: "boss",
-    name: "The Cursed Knight",
-    subtitle: "The keep's heart will not yield",
-    ambient: "boss",
-    rewardUpgrade: false,
+    id: "enc11",
+    name: "The Shattered Vault",
+    subtitle: "Wards crack under their own weight",
+    ambient: "deep",
+    rewardUpgrade: true,
     waves: [
       {
-        delayMs: 1200,
-        spawns: [{ kind: "boss", laneX: 0.0, startDepth: 1.0 }],
+        delayMs: 350,
+        spawns: [
+          { kind: "guard", laneX: -0.7, startDepth: 0.9 },
+          { kind: "caster", laneX: 0.0, startDepth: 1.1, delayMs: 300 },
+          { kind: "guard", laneX: 0.7, startDepth: 0.9, delayMs: 550 },
+        ],
+      },
+      {
+        delayMs: 700,
+        spawns: [
+          { kind: "ghoul", laneX: -0.6, startDepth: 0.85 },
+          { kind: "ghost", laneX: 0.6, startDepth: 0.9, delayMs: 250 },
+          { kind: "glyph", laneX: 0.95, startDepth: 0.65, delayMs: 500 },
+        ],
       },
     ],
   },
+  {
+    id: "enc12",
+    name: "Choir of the Damned",
+    subtitle: "A hundred voices, one dirge",
+    ambient: "deep",
+    rewardUpgrade: true,
+    waves: [
+      {
+        delayMs: 350,
+        spawns: [
+          { kind: "ghost", laneX: -0.8, startDepth: 0.9 },
+          { kind: "ghost", laneX: 0.0, startDepth: 0.95, delayMs: 200 },
+          { kind: "ghost", laneX: 0.8, startDepth: 0.9, delayMs: 400 },
+        ],
+      },
+      {
+        delayMs: 700,
+        spawns: [
+          { kind: "caster", laneX: -0.5, startDepth: 1.05 },
+          { kind: "caster", laneX: 0.5, startDepth: 1.05, delayMs: 300 },
+          { kind: "ghoul", laneX: 0.0, startDepth: 0.85, delayMs: 150 },
+        ],
+      },
+    ],
+  },
+  {
+    id: "enc13",
+    name: "The Last Bastion",
+    subtitle: "The keep spends its final guardians",
+    ambient: "elite",
+    rewardUpgrade: true,
+    waves: [
+      {
+        delayMs: 450,
+        spawns: [
+          { kind: "elite", laneX: 0.0, startDepth: 1.0 },
+          { kind: "guard", laneX: -0.75, startDepth: 0.9, delayMs: 350 },
+          { kind: "guard", laneX: 0.75, startDepth: 0.9, delayMs: 550 },
+        ],
+      },
+      {
+        delayMs: 750,
+        spawns: [
+          { kind: "caster", laneX: -0.5, startDepth: 1.05 },
+          { kind: "ghost", laneX: 0.5, startDepth: 0.95, delayMs: 300 },
+          { kind: "ghoul", laneX: 0.0, startDepth: 0.85, delayMs: 150 },
+        ],
+      },
+    ],
+  },
+  bossEncounter("The Keep's Heart", "The final guardian will not yield"),
 ];
 
 /** Back-compat alias — older imports referenced ENCOUNTERS. */

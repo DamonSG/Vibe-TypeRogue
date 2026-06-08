@@ -39,12 +39,13 @@ export const GAME_MODES: Record<RunModeId, GameModeConfig> = {
     id: "cursedCastleRun",
     label: "Cursed Castle Run",
     description:
-      "Standard 10-stage descent. Survive the castle and face the Cursed Knight.",
+      "A 15-stage descent. A boss guards every fifth stage; survive them all.",
     modeType: "standard",
-    maxStages: 10,
-    roguelikeEnabled: true,
+    maxStages: 15,
+    roguelikeEnabled: false,
     sentencesEnabled: true,
     bossesEnabled: true,
+    bossEvery: 5,
   },
 
   endlessCrypt: {

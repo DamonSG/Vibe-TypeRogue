@@ -4,6 +4,12 @@ export const TUNING = {
     startingShield: 0,
     /** Below this fraction of HP, "low HP" feedback kicks in */
     lowHpFraction: 0.3,
+    /** Lives (candles) for lives-based modes like Cursed Castle Run. */
+    maxLives: 3,
+    /** Consecutive perfect words needed to earn an extra life (lives modes). */
+    perfectStreakForLife: 10,
+    /** Hard cap on lives/candles so the candle HUD never overflows. */
+    maxLivesCap: 6,
   },
 
   combat: {
@@ -17,6 +23,8 @@ export const TUNING = {
     comboBonusPer: 5,
     comboMultiplierStep: 0.08,
     comboMultiplierMax: 1.6,
+    /** Cursed Castle Run: ms of attack-countdown reprieve when a hit enemy survives. */
+    surviveReprieveMs: 2000,
   },
 
   combo: {
@@ -44,15 +52,22 @@ export const TUNING = {
 
   audio: {
     masterVolume: 0.6,
-    tickVolume: 0.22,
-    missVolume: 0.32,
-    impactVolume: 0.5,
-    killVolume: 0.7,
-    phaseVolume: 0.8,
-    musicVolume: 0.0, // no music in V1
+    tickVolume: 0.6,
+    missVolume: 0.18,
+    impactVolume: 0.25,
+    /** Kill-confirm ping — subtle so it sits under the keyboard tick. */
+    killVolume: 0.14,
+    phaseVolume: 0.4,
+    /** Celebratory chime when a perfect streak earns an extra life. */
+    extraLifeVolume: 0.3,
+    /** Per-track gain applied to background music (keeps songs below SFX). */
+    musicTrackVolume: 0.5,
+    /** Perfect-word chime — subtle so the keyboard tick stays loudest. */
+    perfectVolume: 0.08,
+    victorySongVolume: 0.6,
     /** Default SFX/music bus levels (0..1) — overridden by saved settings. */
-    defaultSfxVolume: 0.8,
-    defaultMusicVolume: 0.5,
+    defaultSfxVolume: 0.5,
+    defaultMusicVolume: 0.1,
   },
 
   feedback: {
@@ -70,11 +85,11 @@ export const TUNING = {
 
   encounter: {
     /** Time after wave clear before next wave / transition triggers */
-    postWaveDelayMs: 600,
+    postWaveDelayMs: 300,
     /** Time for the encounter banner to remain on screen */
     bannerMs: 1800,
     /** Delay between transition and next encounter start */
-    transitionMs: 1600,
+    transitionMs: 800,
   },
 
   upgrade: {

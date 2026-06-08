@@ -1,5 +1,7 @@
 import type { SettingsScreen } from "./SettingsScreen";
+import type { SettingsStore } from "./SettingsStore";
 import { GAME_MODES, MODE_ORDER, DEFAULT_MODE, type RunModeId } from "../data/modes";
+import { MUSIC_TRACK_ORDER, MUSIC_TRACKS, type MusicTrackId } from "../game/AudioEngine";
 
 export interface MainMenuCallbacks {
   onStartGame(mode: RunModeId): void;
@@ -19,6 +21,7 @@ export class MainMenu {
   constructor(
     private root: HTMLElement,
     private settings: SettingsScreen,
+    private settingsStore: SettingsStore,
     private cbs: MainMenuCallbacks,
   ) {}
 
@@ -28,12 +31,22 @@ export class MainMenu {
 
   show(): void {
     this.hide();
+
+    const musicMode = this.settingsStore.get().musicMode;
+    const trackOptions = [
+      `<option value="random"${musicMode === "random" ? " selected" : ""}>Random</option>`,
+      ...MUSIC_TRACK_ORDER.map(
+        (id) =>
+          `<option value="${id}"${musicMode === id ? " selected" : ""}>${MUSIC_TRACKS[id].label}</option>`,
+      ),
+    ].join("");
+
     const el = document.createElement("div");
     el.className = "menu-overlay main-menu";
     el.dataset.mainMenu = "1";
     el.innerHTML = `
       <div class="main-menu-content">
-        <div class="menu-eyebrow">A Typing Roguelike</div>
+        <div class="menu-eyebrow">A TYPING LIGHTGUN</div>
         <h1 class="menu-title">TypeRogue</h1>
         <div class="menu-subtitle">Cursed Castle &mdash; Vol. I</div>
         <div class="menu-buttons">
@@ -42,6 +55,13 @@ export class MainMenu {
           <button type="button" class="menu-button" data-records>Records</button>
           <button type="button" class="menu-button" data-settings>Settings</button>
         </div>
+        <div class="menu-song-picker">
+          <label class="menu-song-label" for="menu-music-track">Music</label>
+          <select id="menu-music-track" class="settings-select" data-menu-track>
+            ${trackOptions}
+          </select>
+        </div>
+        <div class="menu-mute-buttons" data-mute-area></div>
         <div class="menu-footer">Type the words above enemies to attack. Survive the castle and fell the Cursed Knight.</div>
       </div>
     `;
@@ -74,6 +94,18 @@ export class MainMenu {
         this.settings.open(() => this.show());
       },
     );
+
+    const trackSelect = el.querySelector<HTMLSelectElement>("[data-menu-track]")!;
+    trackSelect.addEventListener("change", () => {
+      const v = trackSelect.value;
+      this.settingsStore.setMusicMode(v === "random" ? "random" : (v as MusicTrackId));
+      this.cbs.onUiSound?.();
+    });
+
+    // Mute buttons (top-right of menu content)
+    const muteArea = el.querySelector<HTMLElement>("[data-mute-area]")!;
+    this.buildMuteButtons(muteArea);
+
     this.root.appendChild(el);
     this.el = el;
   }
@@ -144,5 +176,38 @@ export class MainMenu {
       },
     );
     this.root.appendChild(el);
+  }
+
+  private buildMuteButtons(container: HTMLElement): void {
+    container.innerHTML = `
+      <button type="button" class="mute-btn" data-mute-sfx title="Mute SFX">
+        <span class="mute-icon">🔊</span><span class="mute-label">SFX</span>
+      </button>
+      <button type="button" class="mute-btn" data-mute-music title="Mute Music">
+        <span class="mute-icon">🎵</span><span class="mute-label">Music</span>
+      </button>
+    `;
+    const sfxBtn = container.querySelector<HTMLButtonElement>("[data-mute-sfx]")!;
+    const musicBtn = container.querySelector<HTMLButtonElement>("[data-mute-music]")!;
+
+    const syncState = (): void => {
+      const s = this.settingsStore.get();
+      sfxBtn.classList.toggle("muted", s.sfxVolume === 0);
+      sfxBtn.querySelector(".mute-icon")!.textContent = s.sfxVolume === 0 ? "🔇" : "🔊";
+      musicBtn.classList.toggle("muted", s.musicVolume === 0);
+      musicBtn.querySelector(".mute-icon")!.textContent = s.musicVolume === 0 ? "🔇" : "🎵";
+    };
+    syncState();
+
+    sfxBtn.addEventListener("click", () => {
+      const cur = this.settingsStore.get().sfxVolume;
+      this.settingsStore.setSfxVolume(cur > 0 ? 0 : 0.5);
+      syncState();
+    });
+    musicBtn.addEventListener("click", () => {
+      const cur = this.settingsStore.get().musicVolume;
+      this.settingsStore.setMusicVolume(cur > 0 ? 0 : 0.1);
+      syncState();
+    });
   }
 }

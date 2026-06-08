@@ -20,6 +20,7 @@ import { SceneRenderer } from "../render/SceneRenderer";
 import { ParallaxScene } from "../render/ParallaxScene";
 import { EnemyView } from "../render/EnemyView";
 import { Effects } from "../render/Effects";
+import { CandleHud } from "../render/CandleHud";
 import { UI } from "../render/UI";
 import type { EndScreenStats } from "../render/UI";
 import { DamageNumbers } from "../render/DamageNumbers";
@@ -46,6 +47,7 @@ export class Game {
   private parallax: ParallaxScene;
   private enemyView: EnemyView;
   private effects: Effects;
+  private candleHud: CandleHud;
   private ui: UI;
   private damageNumbers: DamageNumbers;
   private stageIndicator: StageIndicator;
@@ -65,20 +67,27 @@ export class Game {
 
   private lastFrameTime = 0;
   private rafHandle = 0;
+  private loopRunning = false;
   /** Suppress input routing when modals are open. */
   private acceptingTypingInput = false;
   /** Number of encounters remaining before victory check */
   private bossEncounterStarted = false;
+  /** Last boss prompt shown — lets gimmick-driven word swaps refresh the card. */
+  private lastBossPromptDisplay = "";
   /** Whether the run is currently paused. */
   private paused = false;
   /** performance.now() at the moment the run was paused (for timer shifting). */
   private pauseStartedAt = 0;
+  /** Pending gameplay timeouts that must be cancelled on menu exit. */
+  private pendingTimeouts: number[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new SceneRenderer(canvas);
+    const isShakeEnabled = () => this.settingsStore.get().screenShake;
+    this.renderer = new SceneRenderer(canvas, isShakeEnabled);
     this.parallax = new ParallaxScene(this.renderer);
     this.enemyView = new EnemyView(this.renderer);
-    this.effects = new Effects(this.renderer);
+    this.effects = new Effects(this.renderer, isShakeEnabled);
+    this.candleHud = new CandleHud();
     this.ui = new UI();
     const uiRoot = document.getElementById("ui-root")!;
     this.damageNumbers = new DamageNumbers(uiRoot);
@@ -99,16 +108,21 @@ export class Game {
     });
 
     // Main menu (replaces the old press-any-key title)
-    this.mainMenu = new MainMenu(uiRoot, this.settingsScreen, {
+    this.mainMenu = new MainMenu(uiRoot, this.settingsScreen, this.settingsStore, {
       onStartGame: (mode) => this.startRun(mode),
       onShowRecords: () => this.showRecords(),
-      onUiSound: () => this.audio.play("uiSelect"),
+      onUiSound: () => {
+        this.audio.unlock();
+        this.audio.play("uiSelect");
+        this.audio.startMusic();
+      },
     });
 
-    // Pause menu + top-right pause button
+    // Pause menu + top-right pause button + mute toggles
     this.pauseMenu = new PauseMenu(
       uiRoot,
       this.settingsScreen,
+      this.settingsStore,
       {
         onResume: () => this.resumeRun(),
         onRestart: () => this.restartRun(),
@@ -152,19 +166,46 @@ export class Game {
 
   start(): void {
     this.showTitleMenu();
-    this.lastFrameTime = performance.now();
-    this.loop();
   }
 
   // ---------- Main loop ----------
 
+  private startLoop(): void {
+    if (this.loopRunning) return;
+    this.loopRunning = true;
+    this.lastFrameTime = performance.now();
+    this.rafHandle = requestAnimationFrame(this.loop);
+  }
+
+  private stopLoop(): void {
+    if (!this.loopRunning) return;
+    this.loopRunning = false;
+    cancelAnimationFrame(this.rafHandle);
+    this.rafHandle = 0;
+  }
+
   private loop = (): void => {
+    if (!this.loopRunning) return;
     const now = performance.now();
     const delta = Math.min(50, now - this.lastFrameTime);
     this.lastFrameTime = now;
     this.tick(delta);
     this.rafHandle = requestAnimationFrame(this.loop);
   };
+
+  private scheduleGameplayTimeout(cb: () => void, ms: number): number {
+    const id = window.setTimeout(() => {
+      this.pendingTimeouts = this.pendingTimeouts.filter((t) => t !== id);
+      cb();
+    }, ms);
+    this.pendingTimeouts.push(id);
+    return id;
+  }
+
+  private clearGameplayTimeouts(): void {
+    for (const id of this.pendingTimeouts) window.clearTimeout(id);
+    this.pendingTimeouts = [];
+  }
 
   private tick(deltaMs: number): void {
     // Always render scene + parallax
@@ -177,7 +218,10 @@ export class Game {
       this.state.mode === "transition";
 
     // Stage indicator + pause button visibility track active gameplay.
-    const showTracker = inCombat || this.state.mode === "countdown";
+    // 40 Words keeps a minimal HUD (top-center clock only), so the bottom
+    // tracker/readout bar is never shown in that mode.
+    const showTracker =
+      !isTimeAttack && (inCombat || this.state.mode === "countdown");
     this.stageIndicator.setVisible(showTracker);
     const showGameplayUi =
       inCombat ||
@@ -188,14 +232,7 @@ export class Game {
       this.state.mode === "results";
     this.ui.setGameplayVisible(showGameplayUi);
     const now = performance.now();
-    if (isTimeAttack) {
-      this.stageIndicator.setReadout({
-        wordsCleared: this.state.wordsCleared,
-        targetWords: GAME_MODES.fortyWords.targetWords ?? 40,
-        elapsedMs: this.state.getElapsedMs(now),
-        wpm: this.state.getWpm(now),
-      });
-    } else if (inCombat) {
+    if (!isTimeAttack && inCombat) {
       this.stageIndicator.update(this.state.encounterIndex);
     }
     this.pauseMenu.setPauseButtonVisible(inCombat && !this.paused);
@@ -221,8 +258,9 @@ export class Game {
       }
       // Validate input vs alive enemies
       this.typing.validateAgainstEnemies(this.state.enemies);
-      // Player HP check (time-attack has no enemy attacks / death)
-      if (!isTimeAttack && this.state.hp <= 0) {
+      // Player defeat check (time-attack has no enemy attacks / death).
+      // Mode-aware: lives (candles) for Cursed Castle Run, HP otherwise.
+      if (!isTimeAttack && this.state.isDefeated()) {
         this.triggerDefeat();
       }
     }
@@ -243,6 +281,10 @@ export class Game {
         modeType: GAME_MODES[this.state.runMode].modeType,
         wordsCleared: this.state.wordsCleared,
         targetWords: GAME_MODES.fortyWords.targetWords ?? 40,
+        usesLives: this.state.usesLives(),
+        perfectStreak: this.state.perfectStreak,
+        perfectStreakTarget: TUNING.player.perfectStreakForLife,
+        perfectWords: this.state.perfectWords,
       },
     );
 
@@ -250,9 +292,34 @@ export class Game {
     if (this.boss.active && this.boss.getBoss()) {
       const b = this.boss.getBoss()!;
       this.ui.updateBoss(b.hp, b.maxHp, this.boss.getCurrentPhase());
+      // Gimmicks (timed words, scramble) can swap the boss prompt outside the
+      // normal complete/survive paths — re-render the card when it changes.
+      if (b.promptDisplay !== this.lastBossPromptDisplay) {
+        this.lastBossPromptDisplay = b.promptDisplay;
+        this.ui.refreshCardPrompt(b.id, b.promptDisplay);
+      }
+    }
+
+    // Candle health HUD: only the combat modes have player health. Lives map
+    // 1:1 to candles in the lives modes (Cursed Castle Run, Endless Crypt).
+    const showCandles = showGameplayUi && !isTimeAttack;
+    this.candleHud.setVisible(showCandles);
+    if (showCandles) {
+      let max: number;
+      let lit: number;
+      if (this.state.usesLives()) {
+        max = this.state.maxLives;
+        lit = this.state.lives;
+      } else {
+        max = 3;
+        const frac = this.state.hp / Math.max(1, this.state.maxHp);
+        lit = Math.max(0, Math.min(max, Math.ceil(frac * max)));
+      }
+      this.candleHud.update(deltaMs, lit, max);
     }
 
     this.renderer.render(deltaMs);
+    this.candleHud.render(this.renderer.renderer);
   }
 
   /** Update enemy approach + attack timers. */
@@ -356,7 +423,9 @@ export class Game {
 
   private processTypingChar(c: string): void {
     const result = this.typing.processChar(c, this.state.enemies);
-    if (result.type === "letter") {
+    if (result.type === "ignored") {
+      return;
+    } else if (result.type === "letter") {
       this.audio.play("tick");
       // Small spark on best-target world position
       const target = result.bestTarget;
@@ -370,6 +439,10 @@ export class Game {
       this.combat.applyMistake(result.expected, result.got, result.nearestEnemy);
       this.ui.flashMistake(result.nearestEnemy ? result.nearestEnemy.id : null);
       this.effects.domShake("light");
+      // Let boss gimmicks (e.g. scramble) react to a mistake on the boss.
+      if (result.nearestEnemy?.def.kind === "boss") {
+        this.boss.notifyMistake();
+      }
     }
   }
 
@@ -381,12 +454,13 @@ export class Game {
   ): void {
     const prevCombo = this.state.combo;
     const result = this.combat.applyWordComplete(enemy, word, perfect, durationMs);
-    this.audio.play(result.killed ? "kill" : "impact");
-    if (result.comboDelta > 0) this.audio.play("comboUp");
-    if (result.shieldGained > 0) this.audio.play("shield");
+    // 40 Words is a pure speedrun — the perfect chime would be relentless there.
+    if (perfect && this.state.runMode !== "fortyWords") this.audio.play("perfect");
+    if (result.extraLifeGained) this.audio.play("extraLife");
 
     const anchor = this.enemyView.getCardAnchor(enemy);
     if (result.killed) {
+      this.audio.play("kill");
       this.effects.killBurst(anchor, enemy.colorHint);
       this.effects.domShake(enemy.def.kind === "boss" ? "heavy" : "medium");
     } else {
@@ -404,10 +478,13 @@ export class Game {
     if (!result.killed && enemy.def.refreshOnSurvive) {
       this.ui.refreshCardPrompt(enemy.id, enemy.promptDisplay);
     }
-    // If this was the boss and it survived, refresh from boss phase pool
-    if (!result.killed && enemy.def.kind === "boss") {
-      this.boss.refreshBossPrompt();
-      this.ui.refreshCardPrompt(enemy.id, enemy.promptDisplay);
+    // If this was the boss, let gimmicks react and (on survive) refresh the word.
+    if (enemy.def.kind === "boss") {
+      this.boss.notifyBossWordComplete(result.perfect, result.killed);
+      if (!result.killed) {
+        this.boss.refreshBossPrompt();
+        this.ui.refreshCardPrompt(enemy.id, enemy.promptDisplay);
+      }
     }
 
     // Chain VFX
@@ -421,15 +498,9 @@ export class Game {
         this.ui.flashHit(c.enemy.id);
         this.enemyView.hit(c.enemy.id);
       }
-      // Floating damage number for each chained hit.
-      const cScreen = this.ui.worldToScreen(cAnchor, this.renderer);
-      this.damageNumbers.spawn(c.damage, cScreen.x, cScreen.y);
     }
 
-    // Floating damage number for the primary hit.
     const screen = this.ui.worldToScreen(anchor, this.renderer);
-    const dmgKind = result.damage >= 50 ? "crit" : "damage";
-    this.damageNumbers.spawn(result.damage, screen.x, screen.y, dmgKind);
     if (result.healed > 0) {
       this.ui.spawnPopup(`+${result.healed} HP`, "heal", screen.x, screen.y - 20);
     }
@@ -479,6 +550,8 @@ export class Game {
   // ---------- Encounter / mode flow ----------
 
   private showTitleMenu(): void {
+    this.stopLoop();
+    this.clearGameplayTimeouts();
     this.paused = false;
     this.pauseMenu.close();
     this.settingsScreen.close();
@@ -491,9 +564,11 @@ export class Game {
     document.body.classList.remove("mode-forty-words");
     this.boss.reset();
     this.bossEncounterStarted = false;
+    this.lastBossPromptDisplay = "";
     this.state.enemies = [];
     this.enemyView.clear();
     this.effects.clear();
+    this.candleHud.clear();
     this.damageNumbers.clear();
     this.ui.hideBossBar();
     this.acceptingTypingInput = false;
@@ -502,9 +577,15 @@ export class Game {
     this.renderer.cameraTargetZ = 0;
     this.renderer.cameraDollyOffset = 0;
     this.mainMenu.show();
+    this.audio.startMusic();
+    // Draw one clean frame so the stopped loop doesn't leave the last
+    // gameplay frame (enemies/effects) frozen on the canvas.
+    this.renderer.render(0);
   }
 
   private startRun(mode: RunModeId = DEFAULT_MODE): void {
+    this.clearGameplayTimeouts();
+    this.startLoop();
     this.mainMenu.hide();
     this.records.close();
     this.settingsScreen.close();
@@ -515,6 +596,7 @@ export class Game {
     this.boss.reset();
     this.ui.hideBossBar();
     this.bossEncounterStarted = false;
+    this.lastBossPromptDisplay = "";
     this.statsRecorded = false;
     this.state.reset();
     this.state.runMode = mode;
@@ -531,6 +613,7 @@ export class Game {
     this.renderer.cameraTargetZ = 0;
     this.renderer.cameraDollyOffset = 0;
     document.body.classList.toggle("mode-forty-words", mode === "fortyWords");
+    this.audio.startMusic();
 
     if (cfg.modeType === "timeAttack") {
       this.startTimeAttack();
@@ -686,8 +769,8 @@ export class Game {
 
   private handleBossEncounterStart(_def: EncounterDef): void {
     this.bossEncounterStarted = true;
-    // Defer binding until boss enemy actually spawns
-    window.setTimeout(() => {
+    this.scheduleGameplayTimeout(() => {
+      if (this.state.mode === "title") return;
       const scale =
         this.state.runMode === "endlessCrypt"
           ? endlessBossScale(this.state.encounterIndex + 1)
@@ -695,9 +778,11 @@ export class Game {
       this.boss.bindBoss(scale);
       const boss = this.boss.getBoss();
       if (boss) {
+        // Adopt the selected boss's sprite/color (def may differ per fight).
+        this.enemyView.refreshSprite(boss.id);
+        this.lastBossPromptDisplay = boss.promptDisplay;
         this.ui.showBossBar(boss.def.displayName, this.boss.totalPhases());
         this.ui.updateBoss(boss.hp, boss.maxHp, this.boss.getCurrentPhase());
-        // Refresh the card to show the phase-correct prompt
         this.ui.refreshCardPrompt(boss.id, boss.promptDisplay);
         this.audio.play("phaseChange");
       }
@@ -714,7 +799,6 @@ export class Game {
   }
 
   private handleBossDefeated(): void {
-    this.audio.play("victory");
     this.effects.domShake("heavy");
     this.state.bossDefeated = true;
     this.state.bossesDefeated++;
@@ -727,24 +811,37 @@ export class Game {
     }
     this.ui.hideBossBar();
 
-    // Endless Crypt: a defeated boss is a checkpoint, not the end of the run —
-    // keep descending until the final level. Only the last level ends the run.
-    const cfg = GAME_MODES[this.state.runMode];
-    if (this.state.runMode === "endlessCrypt") {
-      const level = this.state.encounterIndex + 1;
-      if (level < cfg.maxStages) {
-        window.setTimeout(() => {
-          this.parallax.setBossMode(false);
-          this.state.enemies = [];
-          this.enemyView.clear();
-          this.boss.reset();
-          this.bossEncounterStarted = false;
-          this.encounter.beginTransition();
-        }, 1400);
-        return;
-      }
+    // With bosses every 5 stages, a defeated boss only ends the run if it was
+    // the final stage; otherwise we transition to the next encounter (both
+    // Cursed Castle Run and Endless Crypt now use this path).
+    const moreStages =
+      this.state.encounterIndex + 1 < this.encounter.totalEncounters();
+    if (moreStages) {
+      this.audio.play("victory");
+      this.scheduleGameplayTimeout(() => {
+        if (this.state.mode === "title") return;
+        this.parallax.setBossMode(false);
+        this.state.enemies = [];
+        this.enemyView.clear();
+        this.boss.clearForNextBoss();
+        this.lastBossPromptDisplay = "";
+        this.bossEncounterStarted = false;
+        this.encounter.beginTransition();
+      }, 1400);
+      return;
     }
-    window.setTimeout(() => this.triggerVictory(), 1400);
+
+    // Final boss of the run.
+    if (this.state.runMode === "cursedCastleRun") {
+      this.audio.stopMusic();
+      this.audio.play("victorySong");
+    } else {
+      this.audio.play("victory");
+    }
+    this.scheduleGameplayTimeout(() => {
+      if (this.state.mode === "title") return;
+      this.triggerVictory();
+    }, 1400);
   }
 
   // ---------- End game ----------
@@ -758,6 +855,7 @@ export class Game {
     this.acceptingTypingInput = false;
     this.stageIndicator.setVisible(false);
     this.pauseMenu.setPauseButtonVisible(false);
+    this.audio.stopMusic();
     this.audio.play("victory");
     this.effects.domShake("medium");
 
@@ -821,7 +919,10 @@ export class Game {
   private triggerVictory(): void {
     this.state.mode = "victory";
     this.state.runEndTime = performance.now();
-    this.audio.play("victory");
+    this.audio.stopMusic();
+    if (this.state.runMode !== "cursedCastleRun") {
+      this.audio.play("victory");
+    }
     this.acceptingTypingInput = false;
     this.stageIndicator.setVisible(false);
     this.pauseMenu.setPauseButtonVisible(false);
@@ -837,6 +938,7 @@ export class Game {
   private triggerDefeat(): void {
     this.state.mode = "defeat";
     this.state.runEndTime = performance.now();
+    this.audio.stopMusic();
     this.audio.play("defeat");
     this.effects.domShake("heavy");
     this.acceptingTypingInput = false;

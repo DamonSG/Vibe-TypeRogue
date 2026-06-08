@@ -26,7 +26,7 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 .hud.hidden,
-.input-bar.hidden,
+.hud-cluster.hidden,
 .cards-root.hidden {
   display: none;
 }
@@ -45,44 +45,6 @@
   color: var(--ink-dim);
 }
 
-/* HP bar */
-.hp-bar {
-  width: 240px;
-  height: 14px;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(244, 236, 216, 0.25);
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
-}
-.hp-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #c14242 0%, #e94f4f 100%);
-  width: 100%;
-  transition:
-    width 220ms ease-out,
-    background 220ms;
-  box-shadow: inset 0 0 6px rgba(255, 80, 80, 0.6);
-}
-.hp-bar-fill.low {
-  background: linear-gradient(90deg, #7a2a2a 0%, #c14242 100%);
-  animation: hp-pulse 0.9s ease-in-out infinite;
-}
-@keyframes hp-pulse {
-  0%,
-  100% {
-    box-shadow: inset 0 0 6px rgba(255, 80, 80, 0.4);
-  }
-  50% {
-    box-shadow: inset 0 0 14px rgba(255, 80, 80, 0.9);
-  }
-}
-.hp-text {
-  font-size: 12px;
-  color: var(--ink);
-  letter-spacing: 1px;
-}
-
 /* Shield indicator */
 .shield-indicator {
   font-size: 13px;
@@ -96,29 +58,6 @@
   display: none;
 }
 
-/* Combo */
-.combo-display {
-  font-family: var(--font-display);
-  font-size: 22px;
-  color: var(--combo);
-  letter-spacing: 2px;
-  white-space: nowrap;
-  transition:
-    transform 120ms ease-out,
-    color 200ms;
-}
-.combo-display.bump {
-  transform: scale(1.18);
-}
-.combo-display.broken {
-  color: var(--danger);
-}
-.combo-display .multiplier {
-  font-size: 14px;
-  color: var(--ink-dim);
-  margin-left: 6px;
-}
-
 /* Score */
 .score-display {
   font-size: 20px;
@@ -126,21 +65,38 @@
   letter-spacing: 2px;
 }
 
-/* WPM secondary readout */
-.wpm-display {
+/* Running PERFECT tally (typo-free words) */
+.perfect-counter {
+  font-family: var(--font-game);
   font-size: 13px;
-  color: var(--ink-dim);
   letter-spacing: 2px;
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(233, 196, 106, 0.45);
   font-variant-numeric: tabular-nums;
-  margin-top: 4px;
 }
 
-/* Build identity badge */
-.build-badge {
-  font-size: 11px;
-  color: var(--ink-dim);
-  letter-spacing: 1px;
-  font-style: italic;
+/* Perfect-streak bar (lives modes): fills toward an extra life. */
+.perfect-streak-bar {
+  position: relative;
+  width: 120px;
+  height: 8px;
+  margin-top: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(244, 236, 216, 0.18);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.perfect-streak-bar.hidden {
+  display: none;
+}
+.perfect-streak-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2fae4e 0%, #6cf06c 100%);
+  box-shadow: 0 0 6px rgba(108, 240, 108, 0.6);
+  transition: width 160ms ease-out;
 }
 
 /* Time-attack speed clock (top center, 40 Words only) */
@@ -237,75 +193,9 @@ body.mode-forty-words .word-card .enemy-hp-bar,
 body.mode-forty-words .word-card .intent {
   display: none;
 }
-
-/* Current typed input bar (bottom center) */
-.input-bar {
-  position: absolute;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  min-width: 220px;
-  max-width: 70%;
-  padding: 10px 22px;
-  background: rgba(7, 5, 13, 0.7);
-  border: 1px solid rgba(244, 236, 216, 0.18);
-  border-radius: 4px;
-  font-family: var(--font-game);
-  font-size: 20px;
-  letter-spacing: 4px;
-  color: var(--accent);
-  text-align: center;
-  z-index: 20;
-  pointer-events: none;
-  text-shadow: 0 0 10px rgba(233, 196, 106, 0.55);
-  min-height: 42px;
-}
-.input-bar.empty {
-  color: var(--ink-dim);
-  text-shadow: none;
-  letter-spacing: 2px;
-  font-size: 12px;
-  text-transform: uppercase;
-  font-style: italic;
-  animation: input-idle-pulse 1.6s ease-in-out infinite;
-}
-/* Blinking caret after the typed text in the input bar. */
-.input-bar:not(.empty)::after {
-  content: "";
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: var(--accent);
-  box-shadow: 0 0 8px rgba(233, 196, 106, 0.7);
-  animation: caret-blink 1.05s steps(1, end) infinite;
-}
-@keyframes input-idle-pulse {
-  0%,
-  100% {
-    border-color: rgba(244, 236, 216, 0.18);
-    box-shadow: 0 0 0 rgba(233, 196, 106, 0);
-  }
-  50% {
-    border-color: rgba(233, 196, 106, 0.35);
-    box-shadow: 0 0 14px rgba(233, 196, 106, 0.18);
-  }
-}
-.input-bar.mistake {
-  animation: input-mistake 320ms ease-out;
-}
-@keyframes input-mistake {
-  0%,
-  100% {
-    border-color: rgba(244, 236, 216, 0.18);
-    color: var(--accent);
-  }
-  50% {
-    border-color: var(--danger);
-    color: var(--danger);
-    background: rgba(233, 79, 79, 0.18);
-  }
+/* 40 Words: hide the full combat HUD (health, combo, score, WPM, build). */
+body.mode-forty-words .hud {
+  display: none;
 }
 
 /* Floating damage / combo popups */

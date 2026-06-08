@@ -6,6 +6,7 @@ export const CURSED_KNIGHT: BossDef = {
   hp: 500,
   scale: 2.2,
   spriteKey: "boss",
+  colorHint: "#7a1830",
   phases: [
     {
       index: 0,

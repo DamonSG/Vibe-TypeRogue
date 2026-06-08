@@ -293,6 +293,24 @@ export function isEndlessBossLevel(level: number): boolean {
   return level % 5 === 0;
 }
 
+/**
+ * Faster spawning: scale all template wave/spawn delays down so words appear
+ * quicker and downtime between enemies is shorter. Returns fresh wave objects so
+ * the shared templates are never mutated.
+ */
+const SPAWN_DELAY_SCALE = 0.5;
+function speedUpWaves(waves: WaveDef[]): WaveDef[] {
+  return waves.map((wave) => ({
+    ...wave,
+    delayMs: Math.round(wave.delayMs * SPAWN_DELAY_SCALE),
+    spawns: wave.spawns.map((s) => ({
+      ...s,
+      delayMs:
+        s.delayMs != null ? Math.round(s.delayMs * SPAWN_DELAY_SCALE) : s.delayMs,
+    })),
+  }));
+}
+
 /** Build the EncounterDef for a given 1-based Endless level. */
 export function generateEndlessLevel(level: number): EncounterDef {
   if (isEndlessBossLevel(level)) {
@@ -305,7 +323,7 @@ export function generateEndlessLevel(level: number): EncounterDef {
       rewardUpgrade: false,
       waves: [
         {
-          delayMs: 1200,
+          delayMs: 600,
           spawns: [{ kind: "boss", laneX: 0.0, startDepth: 1.0 }],
         },
       ],
@@ -319,7 +337,7 @@ export function generateEndlessLevel(level: number): EncounterDef {
     subtitle: t.subtitle,
     ambient: t.ambient ?? "deep",
     rewardUpgrade: true,
-    waves: t.waves,
+    waves: speedUpWaves(t.waves),
   };
 }
 

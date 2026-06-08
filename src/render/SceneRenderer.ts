@@ -27,8 +27,10 @@ export class SceneRenderer {
   private shakeAmplitude = 0;
   private shakeDecayPerMs = 0.008;
   private shakeOffset = new THREE.Vector3();
+  private isShakeEnabled: () => boolean;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, isShakeEnabled: () => boolean = () => true) {
+    this.isShakeEnabled = isShakeEnabled;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -91,6 +93,7 @@ export class SceneRenderer {
 
   /** Trigger a screen shake of the given amplitude (0.04 light, 0.12 heavy). */
   shake(amount: number): void {
+    if (!this.isShakeEnabled()) return;
     this.shakeAmplitude = Math.max(this.shakeAmplitude, amount);
   }
 

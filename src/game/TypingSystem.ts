@@ -20,6 +20,10 @@ export type TypingResult =
       expected: string;
       got: string;
       nearestEnemy: Enemy | null;
+    }
+  | {
+      /** A keypress that should be silently swallowed (no effect, no mistake). */
+      type: "ignored";
     };
 
 /**
@@ -69,6 +73,20 @@ export class TypingSystem {
    */
   processChar(char: string, enemies: Enemy[]): TypingResult {
     const c = char;
+
+    // Spacebar is only meaningful inside multi-word prompts. If no active
+    // candidate expects a space at this position, silently swallow it so a
+    // stray space never registers as a typo or breaks the combo.
+    if (c === " ") {
+      const nextWithSpace = this.currentInput + " ";
+      const anyExpectsSpace = enemies.some(
+        (e) => e.alive && !e.dying && e.promptMatch.startsWith(nextWithSpace),
+      );
+      if (!anyExpectsSpace) {
+        return { type: "ignored" };
+      }
+    }
+
     const next = this.currentInput + c;
     const candidates = enemies.filter(
       (e) => e.alive && !e.dying && e.promptMatch.startsWith(next),

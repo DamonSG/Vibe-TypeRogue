@@ -5,6 +5,7 @@ export type EnemyKind =
   | "ghost"
   | "caster"
   | "elite"
+  | "glyph"
   | "boss";
 
 export type UpgradeCategory =
@@ -67,6 +68,8 @@ export interface Enemy {
   colorHint: string;
   /** Whether the word card anchors above the enemy's head or below their feet — alternates per spawn for visual variety. */
   cardAnchorSide: "top" | "bottom";
+  /** Marks an enemy spawned by/linked to the active boss (weak points, runes). */
+  bossLinked?: boolean;
 }
 
 export interface EncounterDef {
@@ -200,6 +203,16 @@ export interface UpgradeDef {
   hooks: Partial<Record<HookEventType, UpgradeHook>>;
 }
 
+/**
+ * A gimmick attached to a boss (or a single phase). `id` resolves to a factory
+ * in the gimmick registry; `params` tunes that instance. Gimmicks are modular:
+ * a boss can mix any number of them, and they share a common lifecycle.
+ */
+export interface BossGimmickConfig {
+  id: string;
+  params?: Record<string, number | string | boolean | string[]>;
+}
+
 export interface BossPhaseDef {
   index: number;
   name: string;
@@ -218,6 +231,8 @@ export interface BossPhaseDef {
   damage: number;
   /** Use phrase-style cards */
   usePhrases: boolean;
+  /** Gimmicks active only while this phase is current. */
+  gimmicks?: BossGimmickConfig[];
 }
 
 export interface BossDef {
@@ -226,7 +241,11 @@ export interface BossDef {
   hp: number;
   scale: number;
   spriteKey: string;
+  /** Tint for procedural sprite + boss VFX. Falls back to the boss enemy def. */
+  colorHint?: string;
   phases: BossPhaseDef[];
+  /** Gimmicks active for the whole fight (in addition to per-phase ones). */
+  gimmicks?: BossGimmickConfig[];
 }
 
 /** Mutable view of player state exposed to hooks. */

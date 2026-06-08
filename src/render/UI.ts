@@ -7,7 +7,7 @@ import type {
 } from "../types";
 import { TUNING } from "../data/tuning";
 import { formatClock, formatDurationShort } from "../data/format";
-import type { ModeType } from "../data/modes";
+import type { ModeType, RunModeId } from "../data/modes";
 import type { SceneRenderer } from "./SceneRenderer";
 import type { EnemyView } from "./EnemyView";
 import type { TypingSystem } from "../game/TypingSystem";
@@ -37,6 +37,14 @@ export interface HudExtras {
   modeType: ModeType;
   wordsCleared: number;
   targetWords: number;
+  /** Whether the current run uses lives (drives the perfect-streak bar). */
+  usesLives: boolean;
+  /** Consecutive perfect words toward the next extra life. */
+  perfectStreak: number;
+  /** Perfect words required to earn an extra life. */
+  perfectStreakTarget: number;
+  /** Total typo-free words completed this run (drives the PERFECT counter). */
+  perfectWords: number;
 }
 
 /** Results payload for the 40 Words completion screen. */
@@ -56,14 +64,13 @@ export class UI {
   private root: HTMLElement;
   // HUD
   private hudEl: HTMLElement;
-  private hpBarFill: HTMLElement;
-  private hpText: HTMLElement;
   private shieldEl: HTMLElement;
-  private comboEl: HTMLElement;
   private scoreEl: HTMLElement;
-  private wpmEl: HTMLElement;
-  private buildBadgeEl: HTMLElement;
-  private inputBar: HTMLElement;
+  // Perfect-streak bar (lives modes only): fills toward an extra life.
+  private perfectBarEl: HTMLElement;
+  private perfectFillEl: HTMLElement;
+  // Running tally of typo-free words ("PERFECT 00").
+  private perfectCounterEl: HTMLElement;
   private cardsRoot: HTMLElement;
   // Time-attack speed clock (top center, 40 Words only)
   private timeClockEl: HTMLElement;
@@ -75,24 +82,19 @@ export class UI {
   private bossPhaseEl: HTMLElement;
   // Cards
   private cards = new Map<string, EnemyCardEl>();
-  private lastCombo = 0;
-  private comboBumpTimeout: number | null = null;
 
   constructor() {
     const r = document.getElementById("ui-root");
     if (!r) throw new Error("ui-root not found");
     this.root = r;
-    const { hud, hpFill, hpText, shield, combo, score, wpm, badge, input } =
+    const { hud, shield, score, perfectBar, perfectFill, perfectCounter } =
       this.buildHUD();
     this.hudEl = hud;
-    this.hpBarFill = hpFill;
-    this.hpText = hpText;
     this.shieldEl = shield;
-    this.comboEl = combo;
     this.scoreEl = score;
-    this.wpmEl = wpm;
-    this.buildBadgeEl = badge;
-    this.inputBar = input;
+    this.perfectBarEl = perfectBar;
+    this.perfectFillEl = perfectFill;
+    this.perfectCounterEl = perfectCounter;
     this.timeClockEl = this.buildTimeClock();
     const { bar, fill, label, phase } = this.buildBossBar();
     this.bossBar = bar;
@@ -117,6 +119,7 @@ export class UI {
       combo: number;
       score: number;
       damageTaken: number;
+      runMode: RunModeId;
     },
     renderer: SceneRenderer,
     enemyView: EnemyView,
@@ -131,7 +134,6 @@ export class UI {
   /** Hide combat-only overlays while non-gameplay menus are open. */
   setGameplayVisible(visible: boolean): void {
     this.hudEl.classList.toggle("hidden", !visible);
-    this.inputBar.classList.toggle("hidden", !visible);
     this.cardsRoot.classList.toggle("hidden", !visible);
     if (!visible) {
       this.timeClockEl.classList.remove("visible");
@@ -143,55 +145,35 @@ export class UI {
       hp: number;
       maxHp: number;
       shield: number;
-      combo: number;
       score: number;
     },
-    typing: TypingSystem,
-    buildIdentity: string,
+    _typing: TypingSystem,
+    _buildIdentity: string,
     extras: HudExtras,
   ): void {
-    // HP
-    const pct = Math.max(0, state.hp / Math.max(1, state.maxHp));
-    this.hpBarFill.style.width = `${pct * 100}%`;
-    this.hpBarFill.classList.toggle("low", pct < TUNING.player.lowHpFraction);
-    this.hpText.textContent = `${Math.ceil(state.hp)} / ${state.maxHp}`;
-    // Shield
+    // Shield (the left cluster holds only this, so hide the box when empty)
+    const leftCluster = this.shieldEl.parentElement;
     if (state.shield > 0) {
       this.shieldEl.classList.remove("hidden");
       this.shieldEl.textContent = `◆ Shield ${Math.ceil(state.shield)}`;
+      leftCluster?.classList.remove("hidden");
     } else {
       this.shieldEl.classList.add("hidden");
+      leftCluster?.classList.add("hidden");
     }
-    // Combo
-    const combo = state.combo;
-    const comboMult = Math.min(
-      TUNING.combat.comboMultiplierMax,
-      1 +
-        Math.floor(combo / TUNING.combat.comboBonusPer) *
-          TUNING.combat.comboMultiplierStep,
-    );
-    if (combo > 0) {
-      const multStr = combo >= TUNING.combat.comboBonusPer
-        ? ` <span class="multiplier">×${comboMult.toFixed(2)}</span>`
-        : "";
-      this.comboEl.innerHTML = `${combo} combo${multStr}`;
-      this.comboEl.classList.remove("broken");
-    } else {
-      this.comboEl.textContent = "—";
-      this.comboEl.classList.remove("broken");
-    }
-    if (combo > this.lastCombo) {
-      this.bumpCombo();
-    } else if (combo === 0 && this.lastCombo > 0) {
-      this.comboEl.classList.add("broken");
-    }
-    this.lastCombo = combo;
     // Score
     this.scoreEl.textContent = state.score.toString().padStart(4, "0");
-    // WPM (secondary readout, all modes)
-    this.wpmEl.textContent = `WPM ${extras.wpm}`;
-    // Build
-    this.buildBadgeEl.textContent = buildIdentity;
+    // Running PERFECT tally (typo-free words this run).
+    this.perfectCounterEl.textContent = `PERFECT ${String(extras.perfectWords).padStart(2, "0")}`;
+    // Perfect-streak bar (lives modes only): fills toward an extra life.
+    if (extras.usesLives) {
+      this.perfectBarEl.classList.remove("hidden");
+      const target = Math.max(1, extras.perfectStreakTarget);
+      const pct = Math.max(0, Math.min(1, extras.perfectStreak / target));
+      this.perfectFillEl.style.width = `${pct * 100}%`;
+    } else {
+      this.perfectBarEl.classList.add("hidden");
+    }
     // Time-attack speed clock + word progress (40 Words only)
     if (extras.modeType === "timeAttack") {
       this.timeClockEl.classList.add("visible");
@@ -203,19 +185,10 @@ export class UI {
     } else {
       this.timeClockEl.classList.remove("visible");
     }
-    // Input bar
-    const input = typing.getCurrentInput();
-    if (input.length === 0) {
-      this.inputBar.classList.add("empty");
-      this.inputBar.textContent = "Type something";
-    } else {
-      this.inputBar.classList.remove("empty");
-      this.inputBar.textContent = input;
-    }
   }
 
   private updateCards(
-    state: { enemies: Enemy[] },
+    state: { enemies: Enemy[]; runMode: RunModeId },
     renderer: SceneRenderer,
     enemyView: EnemyView,
     typing: TypingSystem,
@@ -264,11 +237,16 @@ export class UI {
       // Mistake flash (set by CombatController via flashCard)
       // Update letter classes
       this.updateLetters(card, e, currentInput, isTarget);
-      // HP bar
-      this.updateHpBar(card, e);
-      // Intent: damage value + numeric attack countdown
+      // HP bar — the boss uses the dedicated top boss bar, so its card shows
+      // just the word; non-boss enemies also hide it in Cursed Castle Run.
+      const showHp =
+        e.def.kind !== "boss" &&
+        state.runMode !== "cursedCastleRun";
+      card.hpBar.style.display = showHp ? "" : "none";
+      if (showHp) this.updateHpBar(card, e);
+      // Intent: numeric attack countdown (damage value omitted — every hit
+      // costs exactly one life regardless of an enemy's damage stat).
       const remainingMs = Math.max(0, e.def.attackTimerMs - e.attackTimer);
-      card.dmgEl.textContent = `\u2694 ${e.def.damage}`;
       card.timerEl.textContent = `${(remainingMs / 1000).toFixed(1)}s`;
       card.el.classList.toggle("danger", remainingMs < 1500);
       // Dying anim
@@ -293,8 +271,8 @@ export class UI {
    */
   private resolveCardOverlap(layouts: CardLayout[]): void {
     if (layouts.length < 2) return;
-    const GAP = 8;
-    for (let pass = 0; pass < 3; pass++) {
+    const GAP = 16;
+    for (let pass = 0; pass < 5; pass++) {
       let moved = false;
       for (let i = 0; i < layouts.length; i++) {
         for (let j = i + 1; j < layouts.length; j++) {
@@ -350,13 +328,6 @@ export class UI {
 
   /** Trigger a mistake flash animation on the enemy's card. */
   flashMistake(enemyId: string | null): void {
-    this.inputBar.classList.remove("mistake");
-    void this.inputBar.offsetWidth;
-    this.inputBar.classList.add("mistake");
-    window.setTimeout(
-      () => this.inputBar.classList.remove("mistake"),
-      TUNING.feedback.inputMistakeMs,
-    );
     if (!enemyId) return;
     const card = this.cards.get(enemyId);
     if (!card) return;
@@ -390,19 +361,6 @@ export class UI {
     el.style.top = `${screenY}px`;
     this.root.appendChild(el);
     window.setTimeout(() => el.remove(), 950);
-  }
-
-  private bumpCombo(): void {
-    this.comboEl.classList.remove("bump");
-    void this.comboEl.offsetWidth;
-    this.comboEl.classList.add("bump");
-    if (this.comboBumpTimeout !== null) {
-      window.clearTimeout(this.comboBumpTimeout);
-    }
-    this.comboBumpTimeout = window.setTimeout(
-      () => this.comboEl.classList.remove("bump"),
-      160,
-    );
   }
 
   // ---------- Boss bar ----------
@@ -442,7 +400,7 @@ export class UI {
     const el = document.createElement("div");
     el.className = "title-screen";
     el.innerHTML = `
-      <div class="subtitle">A Typing Roguelike</div>
+      <div class="subtitle">A TYPING LIGHTGUN</div>
       <h1>TypeRogue</h1>
       <div class="subtitle">Cursed Castle — Vol. I</div>
       <div class="start-prompt">Press any key to begin</div>
@@ -671,48 +629,35 @@ export class UI {
 
   private buildHUD(): {
     hud: HTMLElement;
-    hpFill: HTMLElement;
-    hpText: HTMLElement;
     shield: HTMLElement;
-    combo: HTMLElement;
     score: HTMLElement;
-    wpm: HTMLElement;
-    badge: HTMLElement;
-    input: HTMLElement;
+    perfectBar: HTMLElement;
+    perfectFill: HTMLElement;
+    perfectCounter: HTMLElement;
   } {
     const hud = document.createElement("div");
     hud.className = "hud";
     hud.innerHTML = `
       <div class="hud-cluster left">
-        <div class="hud-label">Vitae</div>
-        <div class="hp-bar"><div class="hp-bar-fill"></div></div>
-        <div class="hp-text">100 / 100</div>
         <div class="shield-indicator hidden">◆ Shield 0</div>
       </div>
       <div class="hud-cluster right">
-        <div class="hud-label">Combo</div>
-        <div class="combo-display">—</div>
-        <div class="hud-label" style="margin-top:8px;">Score</div>
+        <div class="hud-label">Score</div>
         <div class="score-display">0000</div>
-        <div class="wpm-display">WPM 0</div>
-        <div class="build-badge">No Build</div>
+        <div class="perfect-counter">PERFECT 00</div>
+        <div class="perfect-streak-bar hidden" title="Perfect streak — fill for an extra life">
+          <div class="perfect-streak-fill"></div>
+        </div>
       </div>
     `;
     this.root.appendChild(hud);
-    const input = document.createElement("div");
-    input.className = "input-bar empty";
-    input.textContent = "Type something";
-    this.root.appendChild(input);
     return {
       hud,
-      hpFill: hud.querySelector(".hp-bar-fill") as HTMLElement,
-      hpText: hud.querySelector(".hp-text") as HTMLElement,
       shield: hud.querySelector(".shield-indicator") as HTMLElement,
-      combo: hud.querySelector(".combo-display") as HTMLElement,
       score: hud.querySelector(".score-display") as HTMLElement,
-      wpm: hud.querySelector(".wpm-display") as HTMLElement,
-      badge: hud.querySelector(".build-badge") as HTMLElement,
-      input,
+      perfectBar: hud.querySelector(".perfect-streak-bar") as HTMLElement,
+      perfectFill: hud.querySelector(".perfect-streak-fill") as HTMLElement,
+      perfectCounter: hud.querySelector(".perfect-counter") as HTMLElement,
     };
   }
 
@@ -786,23 +731,15 @@ export class UI {
     hpBar.appendChild(hpFill);
     hpBar.appendChild(hpText);
     el.appendChild(hpBar);
-    // Intent row: damage + attack timer countdown (Slay-the-Spire style)
+    // Intent row: attack timer countdown only (damage value omitted).
     const intent = document.createElement("div");
     intent.className = "intent";
-    const dmgEl = document.createElement("span");
-    dmgEl.className = "dmg";
-    dmgEl.textContent = `\u2694 ${enemy.def.damage}`;
-    const sep = document.createElement("span");
-    sep.className = "sep";
-    sep.textContent = "\u00B7";
     const timerEl = document.createElement("span");
     timerEl.className = "timer";
     timerEl.textContent = `${(enemy.def.attackTimerMs / 1000).toFixed(1)}s`;
-    intent.appendChild(dmgEl);
-    intent.appendChild(sep);
     intent.appendChild(timerEl);
     el.appendChild(intent);
-    return { el, prompt, letters, hpFill, hpText, dmgEl, timerEl, enemyId: enemy.id };
+    return { el, prompt, letters, hpBar, hpFill, hpText, timerEl, enemyId: enemy.id };
   }
 
   /** Force a card to refresh its rendered prompt (when refreshOnSurvive triggers). */
@@ -836,9 +773,9 @@ interface EnemyCardEl {
   el: HTMLElement;
   prompt: HTMLElement;
   letters: HTMLElement[];
+  hpBar: HTMLElement;
   hpFill: HTMLElement;
   hpText: HTMLElement;
-  dmgEl: HTMLElement;
   timerEl: HTMLElement;
   enemyId: string;
 }

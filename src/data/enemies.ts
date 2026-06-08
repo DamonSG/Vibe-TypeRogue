@@ -1,29 +1,22 @@
 import type { EnemyDef, EnemyKind } from "../types";
-import { WORD_POOLS } from "./words";
+import { WORD_POOLS, GLYPH_PROMPTS } from "./words";
 import { COMMON_WORDS, COMMON_PHRASES } from "./commonWords";
 
-// Generic words double-stacked vs themed flavor → roughly 2:1 generic:themed.
-const wordMix = (themed: readonly string[]): string[] => [
-  ...COMMON_WORDS,
-  ...COMMON_WORDS,
-  ...themed,
-];
-const phraseMix = (themed: readonly string[]): string[] => [
-  ...COMMON_PHRASES,
-  ...COMMON_PHRASES,
-  ...themed,
-];
+// Regular enemies now draw purely from the generic random word/phrase banks
+// (no themed flavor). The boss keeps its themed pool via WORD_POOLS.boss.
+const wordPool = (): string[] => [...COMMON_WORDS];
+const phrasePool = (): string[] => [...COMMON_PHRASES];
 
 export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
   skeleton: {
     kind: "skeleton",
     displayName: "Skeleton Grunt",
     hp: 25,
-    attackTimerMs: 12000,
+    attackTimerMs: 15000,
     damage: 10,
-    promptPool: wordMix(WORD_POOLS.skeleton),
+    promptPool: wordPool(),
     spriteKey: "skeleton",
-    refreshOnSurvive: false,
+    refreshOnSurvive: true,
     scale: 1.0,
     approachSpeed: 1.0,
     cardStyle: "default",
@@ -33,11 +26,11 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     kind: "ghoul",
     displayName: "Crawling Ghoul",
     hp: 22,
-    attackTimerMs: 9000,
+    attackTimerMs: 15000,
     damage: 8,
-    promptPool: wordMix(WORD_POOLS.ghoul),
+    promptPool: wordPool(),
     spriteKey: "ghoul",
-    refreshOnSurvive: false,
+    refreshOnSurvive: true,
     scale: 0.85,
     approachSpeed: 1.4,
     cardStyle: "default",
@@ -47,9 +40,9 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     kind: "guard",
     displayName: "Shielded Guard",
     hp: 60,
-    attackTimerMs: 14000,
+    attackTimerMs: 15000,
     damage: 14,
-    promptPool: wordMix(WORD_POOLS.guard),
+    promptPool: wordPool(),
     spriteKey: "guard",
     refreshOnSurvive: true,
     scale: 1.1,
@@ -61,11 +54,11 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     kind: "ghost",
     displayName: "Ghost",
     hp: 32,
-    attackTimerMs: 11000,
+    attackTimerMs: 15000,
     damage: 9,
-    promptPool: wordMix(WORD_POOLS.ghost),
+    promptPool: wordPool(),
     spriteKey: "ghost",
-    refreshOnSurvive: false,
+    refreshOnSurvive: true,
     scale: 0.95,
     approachSpeed: 1.1,
     cardStyle: "default",
@@ -75,9 +68,9 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     kind: "caster",
     displayName: "Cursed Caster",
     hp: 38,
-    attackTimerMs: 10000,
+    attackTimerMs: 15000,
     damage: 12,
-    promptPool: phraseMix(WORD_POOLS.caster),
+    promptPool: phrasePool(),
     spriteKey: "caster",
     refreshOnSurvive: true,
     scale: 1.0,
@@ -90,9 +83,9 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     kind: "elite",
     displayName: "Elite Knight",
     hp: 90,
-    attackTimerMs: 13000,
+    attackTimerMs: 15000,
     damage: 18,
-    promptPool: phraseMix(WORD_POOLS.elite),
+    promptPool: phrasePool(),
     spriteKey: "elite",
     refreshOnSurvive: true,
     scale: 1.2,
@@ -101,11 +94,25 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     isPhrase: true,
     colorHint: "#3c3c4a",
   },
+  glyph: {
+    kind: "glyph",
+    displayName: "Glyph Wisp",
+    hp: 1,
+    attackTimerMs: 7000,
+    damage: 6,
+    promptPool: [...GLYPH_PROMPTS],
+    spriteKey: "glyph",
+    refreshOnSurvive: false,
+    scale: 0.65,
+    approachSpeed: 1.6,
+    cardStyle: "default",
+    colorHint: "#ffd864",
+  },
   boss: {
     kind: "boss",
     displayName: "The Cursed Knight",
     hp: 500,
-    attackTimerMs: 11000,
+    attackTimerMs: 10000,
     damage: 22,
     promptPool: [...WORD_POOLS.boss],
     spriteKey: "boss",

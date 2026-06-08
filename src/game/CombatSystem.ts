@@ -30,6 +30,8 @@ export interface CombatResult {
   perfect: boolean;
   /** Whether a chain triggered (for VFX). */
   chainTriggered: boolean;
+  /** Whether this completion earned an extra life (lives modes). */
+  extraLifeGained: boolean;
 }
 
 /**
@@ -46,12 +48,29 @@ export class CombatSystem {
     perfect: boolean,
     durationMs: number,
   ): CombatResult {
+    let extraLifeGained = false;
     // Pre-increment wordsTyped/perfectWords so hooks see updated state.
     this.state.wordsTyped++;
     this.state.charsTyped += word.replace(/\s+/g, "").length;
     if (perfect) {
       this.state.perfectWords++;
       this.state.perfectWordsSinceBarrier++;
+      this.state.perfectStreak++;
+      // Lives modes (Cursed Castle Run, Endless Crypt): a streak of perfect
+      // words earns an extra life (candle), up to the cap.
+      if (
+        this.state.usesLives() &&
+        this.state.perfectStreak >= TUNING.player.perfectStreakForLife
+      ) {
+        this.state.perfectStreak = 0;
+        if (this.state.lives < TUNING.player.maxLivesCap) {
+          this.state.lives++;
+          extraLifeGained = true;
+          if (this.state.lives > this.state.maxLives) {
+            this.state.maxLives = this.state.lives;
+          }
+        }
+      }
     } else {
       this.state.perfectWordsSinceBarrier = 0;
     }
@@ -143,6 +162,12 @@ export class CombatSystem {
     if (killedPrimary) {
       this.fireKill(enemy, perfect);
     } else {
+      // Cursed Castle Run: a non-lethal hit buys time before this enemy attacks,
+      // giving the player room to finish the kill. Uncapped (may push the visible
+      // countdown above the enemy's base timer); applies to the boss too.
+      if (this.state.runMode === "cursedCastleRun") {
+        enemy.attackTimer -= TUNING.combat.surviveReprieveMs;
+      }
       // Survives — handle refresh-on-survive (tanky enemies get new prompts)
       if (enemy.def.refreshOnSurvive) {
         refreshEnemyPrompt(this.state, enemy);
@@ -163,6 +188,7 @@ export class CombatSystem {
       comboDelta: Math.trunc(comboGain),
       perfect,
       chainTriggered: chains.length > 0,
+      extraLifeGained,
     };
   }
 
@@ -184,12 +210,22 @@ export class CombatSystem {
     } else {
       this.state.setCombo(0);
     }
+    // On a typo, reset the PERFECT counter (the green extra-life bar keeps its
+    // progress and only resets when it awards a life).
+    this.state.perfectWords = 0;
     this.state.echoChainCount = 0;
     return this.state.combo;
   }
 
   /** Called when an enemy attack lands on the player. */
   applyEnemyAttack(enemy: Enemy): number {
+    // Lives-based modes (Cursed Castle Run): a landed attack removes exactly
+    // one life (candle), regardless of the enemy's HP damage value.
+    if (this.state.usesLives()) {
+      this.state.lives = Math.max(0, this.state.lives - 1);
+      this.state.damageTaken += enemy.def.damage;
+      return 1;
+    }
     const dmg = enemy.def.damage;
     const lost = this.state.applyDamage(dmg);
     return lost;
@@ -236,6 +272,10 @@ export class CombatSystem {
   /** Apply damage to an enemy. Returns true if killed. */
   private applyDamageToEnemy(enemy: Enemy, dmg: number): boolean {
     if (!enemy.alive || enemy.dying) return false;
+    // Boss gimmicks (e.g. armor) may reduce the damage that actually lands.
+    if (enemy.def.kind === "boss" && this.state.bossDamageModifier) {
+      dmg = Math.max(0, Math.round(this.state.bossDamageModifier(dmg)));
+    }
     enemy.hp = Math.max(0, enemy.hp - dmg);
     if (enemy.hp <= 0) {
       enemy.alive = false;

@@ -19,6 +19,9 @@ export class GameState implements GameStateSnapshot {
   // --- Player & run stats
   hp: number = TUNING.player.maxHp;
   maxHp: number = TUNING.player.maxHp;
+  /** Lives (candles) for lives-based modes (Cursed Castle Run). */
+  lives: number = TUNING.player.maxLives;
+  maxLives: number = TUNING.player.maxLives;
   shield: number = 0;
   combo: number = 0;
   score: number = 0;
@@ -35,6 +38,8 @@ export class GameState implements GameStateSnapshot {
   echoChainCount: number = 0;
   // For Shield Script (resets on grant)
   perfectWordsSinceBarrier: number = 0;
+  /** Consecutive perfect words toward the next extra life (lives modes). */
+  perfectStreak: number = 0;
 
   // --- Mode / flow
   mode: GameMode = "title";
@@ -71,10 +76,18 @@ export class GameState implements GameStateSnapshot {
   /** Last word completion timestamp — used for combo decay */
   lastWordAt: number = 0;
 
+  /**
+   * Optional filter applied to damage about to land on the active boss. Set by
+   * BossSystem while a boss with damage-altering gimmicks (e.g. armor) is active.
+   */
+  bossDamageModifier?: (dmg: number) => number;
+
   /** Reset everything for a fresh run. */
   reset(): void {
     this.hp = TUNING.player.maxHp;
     this.maxHp = TUNING.player.maxHp;
+    this.lives = TUNING.player.maxLives;
+    this.maxLives = TUNING.player.maxLives;
     this.shield = TUNING.player.startingShield;
     this.combo = 0;
     this.score = 0;
@@ -88,6 +101,7 @@ export class GameState implements GameStateSnapshot {
     this.lastWordFirstLetter = null;
     this.echoChainCount = 0;
     this.perfectWordsSinceBarrier = 0;
+    this.perfectStreak = 0;
     this.mode = "title";
     this.runStartTime = 0;
     this.runEndTime = 0;
@@ -102,6 +116,7 @@ export class GameState implements GameStateSnapshot {
     this.ownedUpgrades = [];
     this.enemies = [];
     this.lastWordAt = 0;
+    this.bossDamageModifier = undefined;
   }
 
   /** Elapsed run time in ms (time-attack uses its own start/stop clock). */
@@ -128,6 +143,18 @@ export class GameState implements GameStateSnapshot {
   /** Used by CombatSystem: check if an upgrade is owned. */
   hasUpgrade(id: string): boolean {
     return this.ownedUpgrades.some((u) => u.id === id);
+  }
+
+  /** Whether the current run uses discrete lives (candles) instead of HP. */
+  usesLives(): boolean {
+    return (
+      this.runMode === "cursedCastleRun" || this.runMode === "endlessCrypt"
+    );
+  }
+
+  /** Whether the player has been defeated (mode-aware: lives vs HP). */
+  isDefeated(): boolean {
+    return this.usesLives() ? this.lives <= 0 : this.hp <= 0;
   }
 
   /** Bump combo, tracking high. */
@@ -195,11 +222,12 @@ export function spawnEnemy(
     pickPromptDistinctFirstLetter(def.promptPool, aliveDisplays);
   const id = `e${++enemyIdCounter}`;
   const now = performance.now();
-  // Boss always anchors top so its big card stays prominently above its head;
-  // other enemies alternate top/bottom so adjacent cards rarely overlap.
+  // Boss anchors its card below its torso: a tall boss projects an above-head
+  // card straight into the top-center boss HP bar, so we keep it low and clear.
+  // Other enemies alternate top/bottom so adjacent cards rarely overlap.
   const cardAnchorSide: "top" | "bottom" =
     kind === "boss"
-      ? "top"
+      ? "bottom"
       : enemyIdCounter % 2 === 0
         ? "top"
         : "bottom";
@@ -231,10 +259,11 @@ export function refreshEnemyPrompt(state: GameState, enemy: Enemy): void {
   const aliveOthers = state.enemies
     .filter((e) => e.alive && e !== enemy)
     .map((e) => e.promptDisplay);
-  const newPrompt = pickPromptDistinctFirstLetter(
-    enemy.def.promptPool,
-    aliveOthers,
-  );
+  // Include the enemy's current word so the refresh always yields a different one.
+  const newPrompt = pickPromptDistinctFirstLetter(enemy.def.promptPool, [
+    ...aliveOthers,
+    enemy.promptDisplay,
+  ]);
   enemy.promptDisplay = newPrompt;
   enemy.promptMatch = normalizePrompt(newPrompt);
   enemy.typedCount = 0;
@@ -251,7 +280,7 @@ export function setEnemyPrompt(enemy: Enemy, prompt: string): void {
   enemy.wordStartedAt = performance.now();
 }
 
-/** Pick a prompt freshly from any pool. */
-export function pickFreshPrompt(pool: readonly string[]): string {
-  return pickPrompt(pool);
+/** Pick a prompt freshly from any pool, optionally avoiding a current word. */
+export function pickFreshPrompt(pool: readonly string[], avoid?: string): string {
+  return pickPrompt(pool, avoid);
 }

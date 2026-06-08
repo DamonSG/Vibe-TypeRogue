@@ -20,7 +20,10 @@ export class Effects {
   private sparkTexture: THREE.CanvasTexture;
   private appEl: HTMLElement;
 
-  constructor(private sr: SceneRenderer) {
+  constructor(
+    private sr: SceneRenderer,
+    private isShakeEnabled: () => boolean = () => true,
+  ) {
     this.dotTexture = buildDotTexture();
     this.sparkTexture = buildSparkTexture();
     this.appEl = document.getElementById("app") as HTMLElement;
@@ -154,6 +157,7 @@ export class Effects {
 
   /** Apply a CSS-driven shake to #app. */
   domShake(strength: "light" | "medium" | "heavy"): void {
+    if (!this.isShakeEnabled()) return;
     this.appEl.classList.remove("shake-light", "shake-medium", "shake-heavy");
     // Force reflow to restart animation
     void this.appEl.offsetWidth;

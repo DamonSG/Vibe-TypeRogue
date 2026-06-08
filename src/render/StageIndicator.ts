@@ -34,6 +34,10 @@ export class StageIndicator {
     this.mode = mode;
     this.currentGroup = -1;
     this.clear();
+    // Node-based modes render as an enlarged vertical column on the right edge;
+    // the 40 Words readout stays as a centered bar.
+    const sideMode = mode === "cursedCastleRun" || mode === "endlessCrypt";
+    this.el.classList.toggle("side", sideMode);
     if (mode === "cursedCastleRun") {
       this.buildCastleNodes();
     } else if (mode === "endlessCrypt") {

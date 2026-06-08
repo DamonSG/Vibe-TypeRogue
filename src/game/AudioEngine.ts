@@ -1,9 +1,30 @@
 /**
- * AudioEngine — procedural Web Audio sound synthesis.
- * No assets. Every sound is built from oscillators + filtered noise.
+ * AudioEngine — Web Audio sound engine.
+ * Most sounds are procedurally synthesized from oscillators + filtered noise.
+ * The keystroke "tick" uses an mp3 sample when available.
+ * Background music loops one of three selectable tracks through the Music bus.
  */
 
 import { TUNING } from "../data/tuning";
+
+export type MusicTrackId = "graveyardGlitch" | "ghastlyGarrison" | "chapelCannon";
+
+export const MUSIC_TRACKS: Record<MusicTrackId, { file: string; label: string }> = {
+  graveyardGlitch: { file: "Graveyard Glitch.mp3", label: "Graveyard Glitch" },
+  ghastlyGarrison: { file: "Ghastly Garrison.mp3", label: "Ghastly Garrison" },
+  chapelCannon: { file: "Chapel Cannon.mp3", label: "Chapel Cannon" },
+};
+
+export const MUSIC_TRACK_ORDER: MusicTrackId[] = [
+  "graveyardGlitch",
+  "ghastlyGarrison",
+  "chapelCannon",
+];
+
+/** A single entry in the rotating background-music playlist. */
+export type PlaylistItem =
+  | { kind: "builtin"; id: MusicTrackId }
+  | { kind: "custom"; id: string; url: string };
 
 type SoundEvent =
   | "tick"
@@ -18,26 +39,42 @@ type SoundEvent =
   | "defeat"
   | "upgrade"
   | "shield"
-  | "uiSelect";
+  | "uiSelect"
+  | "perfect"
+  | "extraLife"
+  | "victorySong";
 
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  /** SFX bus — all sound effects route here. Controlled by the SFX slider. */
   private sfxGain: GainNode | null = null;
-  /** Music bus — background music routes here (no source yet). Controlled by the Music slider. */
   private musicGain: GainNode | null = null;
-  /** Pre-built noise buffer used for "shh"/impact components. */
   private noiseBuffer: AudioBuffer | null = null;
-  /** Track when audio is first unlocked (browser requires user gesture). */
+  private tickBuffer: AudioBuffer | null = null;
+  private perfectBuffer: AudioBuffer | null = null;
+  private victorySongBuffer: AudioBuffer | null = null;
   private unlocked = false;
-  /** Slight variation in tick pitch for satisfying rolls. */
   private tickIndex = 0;
-  /** Cached volumes (0..1) so settings set before unlock still apply on unlock. */
   private sfxVolume: number = TUNING.audio.defaultSfxVolume;
   private musicVolume: number = TUNING.audio.defaultMusicVolume;
 
-  /** Must be called from a user gesture (first keydown). */
+  // --- Music state ---
+  /** Ordered list of enabled tracks; rotation advances through these. */
+  private playlist: PlaylistItem[] = [];
+  private playlistIndex = 0;
+  /** When true, rotation jumps to a random next track instead of sequentially. */
+  private shuffle = false;
+  /** True while music should be playing (menu / gameplay), false on end screens. */
+  private musicActive = false;
+  private currentItemId: string | null = null;
+  private musicSource: AudioBufferSourceNode | null = null;
+  private musicTrackGain: GainNode | null = null;
+  /** Decoded buffers keyed by playlist item id. */
+  private musicBufferCache = new Map<string, AudioBuffer>();
+  /** Guards against stale async loads when the playlist changes mid-load. */
+  private musicLoadToken = 0;
+
+  /** Must be called from a user gesture (first keydown or click). */
   unlock(): void {
     if (this.unlocked) return;
     try {
@@ -49,7 +86,6 @@ export class AudioEngine {
       this.master = this.ctx.createGain();
       this.master.gain.value = TUNING.audio.masterVolume;
       this.master.connect(this.ctx.destination);
-      // SFX + Music buses both feed the master.
       this.sfxGain = this.ctx.createGain();
       this.sfxGain.gain.value = this.sfxVolume;
       this.sfxGain.connect(this.master);
@@ -58,6 +94,13 @@ export class AudioEngine {
       this.musicGain.connect(this.master);
       this.noiseBuffer = this.buildNoiseBuffer(this.ctx, 0.8);
       this.unlocked = true;
+      this.loadTickSound();
+      this.loadSampleSound("Perfect Sound.mp3").then((buf) => {
+        this.perfectBuffer = buf;
+      });
+      this.loadSampleSound("Victory Song.mp3").then((buf) => {
+        this.victorySongBuffer = buf;
+      });
     } catch (err) {
       console.warn("[Audio] unlock failed", err);
     }
@@ -68,7 +111,6 @@ export class AudioEngine {
     this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
   }
 
-  /** Set SFX bus volume (0..1) — typing, UI, hits, deaths, rewards, combat. */
   setSfxVolume(v: number): void {
     this.sfxVolume = Math.max(0, Math.min(1, v));
     if (this.sfxGain && this.ctx) {
@@ -76,13 +118,144 @@ export class AudioEngine {
     }
   }
 
-  /** Set Music bus volume (0..1) — background music only. */
   setMusicVolume(v: number): void {
     this.musicVolume = Math.max(0, Math.min(1, v));
     if (this.musicGain && this.ctx) {
       this.musicGain.gain.setTargetAtTime(this.musicVolume, this.ctx.currentTime, 0.05);
     }
   }
+
+  // --- Music playback ---
+
+  /**
+   * Replace the rotation playlist. If music is active, keeps the current track
+   * playing when it's still enabled, otherwise restarts from the top. An empty
+   * playlist falls silent.
+   */
+  setPlaylist(items: PlaylistItem[]): void {
+    this.playlist = items.slice();
+    if (!this.musicActive) return;
+    if (items.length === 0) {
+      this.stopCurrentSource();
+      return;
+    }
+    // If the current track is still in the list, keep it playing.
+    const idx = this.currentItemId
+      ? items.findIndex((i) => i.id === this.currentItemId)
+      : -1;
+    if (idx >= 0 && this.musicSource) {
+      this.playlistIndex = idx;
+      return;
+    }
+    // Otherwise (re)start from the beginning of the new list.
+    this.stopCurrentSource();
+    this.playlistIndex = 0;
+    void this.playCurrent();
+  }
+
+  startMusic(): void {
+    if (!this.unlocked || !this.ctx || !this.musicGain) return;
+    this.musicActive = true;
+    if (this.musicSource) return;
+    if (this.playlist.length === 0) return;
+    if (this.playlistIndex >= this.playlist.length) this.playlistIndex = 0;
+    void this.playCurrent();
+  }
+
+  stopMusic(): void {
+    this.musicActive = false;
+    this.stopCurrentSource();
+  }
+
+  private stopCurrentSource(): void {
+    // Bump the token so any in-flight load won't start a stale source.
+    this.musicLoadToken++;
+    if (this.musicSource) {
+      this.musicSource.onended = null;
+      try {
+        this.musicSource.stop();
+      } catch { /* already stopped */ }
+      this.musicSource.disconnect();
+      this.musicSource = null;
+    }
+    if (this.musicTrackGain) {
+      this.musicTrackGain.disconnect();
+      this.musicTrackGain = null;
+    }
+    this.currentItemId = null;
+  }
+
+  /** Toggle random (shuffle) playback for the rotation playlist. */
+  setShuffle(enabled: boolean): void {
+    this.shuffle = enabled;
+  }
+
+  private advanceTrack(): void {
+    if (!this.musicActive || this.playlist.length === 0) return;
+    if (this.shuffle && this.playlist.length > 1) {
+      // Pick a random next track that isn't the one we just finished.
+      let next = this.playlistIndex;
+      while (next === this.playlistIndex) {
+        next = Math.floor(Math.random() * this.playlist.length);
+      }
+      this.playlistIndex = next;
+    } else {
+      this.playlistIndex = (this.playlistIndex + 1) % this.playlist.length;
+    }
+    void this.playCurrent();
+  }
+
+  private async playCurrent(): Promise<void> {
+    if (!this.ctx || !this.musicGain || !this.musicActive) return;
+    if (this.playlist.length === 0) return;
+    const item = this.playlist[this.playlistIndex % this.playlist.length];
+    const token = ++this.musicLoadToken;
+    const buffer = await this.loadPlaylistItem(item);
+    // Bail if the playlist changed / music stopped while loading.
+    if (token !== this.musicLoadToken || !this.musicActive) return;
+    if (!this.ctx || !this.musicGain || this.musicSource) return;
+    if (!buffer) {
+      // Skip a track that failed to load (avoid tight-looping on one item).
+      if (this.playlist.length > 1) this.advanceTrack();
+      return;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    // Rotate via onended (single-track playlists naturally repeat).
+    source.loop = false;
+    const trackGain = this.ctx.createGain();
+    trackGain.gain.value = TUNING.audio.musicTrackVolume;
+    source.connect(trackGain);
+    trackGain.connect(this.musicGain);
+    source.onended = () => {
+      if (source !== this.musicSource) return;
+      this.musicSource = null;
+      this.currentItemId = null;
+      if (this.musicTrackGain) {
+        this.musicTrackGain.disconnect();
+        this.musicTrackGain = null;
+      }
+      this.advanceTrack();
+    };
+    source.start();
+    this.musicSource = source;
+    this.musicTrackGain = trackGain;
+    this.currentItemId = item.id;
+  }
+
+  private async loadPlaylistItem(item: PlaylistItem): Promise<AudioBuffer | null> {
+    const cached = this.musicBufferCache.get(item.id);
+    if (cached) return cached;
+    const src =
+      item.kind === "builtin"
+        ? `${import.meta.env.BASE_URL}Sounds/${MUSIC_TRACKS[item.id].file}`
+        : item.url;
+    const buf = await this.loadUrl(src);
+    if (buf) this.musicBufferCache.set(item.id, buf);
+    return buf;
+  }
+
+  // --- SFX play ---
 
   play(event: SoundEvent): void {
     if (!this.ctx || !this.master) return;
@@ -126,13 +299,34 @@ export class AudioEngine {
       case "uiSelect":
         this.playUiSelect();
         break;
+      case "perfect":
+        this.playPerfect();
+        break;
+      case "extraLife":
+        this.playExtraLife();
+        break;
+      case "victorySong":
+        this.playVictorySong();
+        break;
     }
   }
 
   // ---------- Sound recipes ----------
 
   private playTick(): void {
-    if (!this.ctx || !this.master) return;
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.tickBuffer) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.tickBuffer;
+      const g = this.ctx.createGain();
+      g.gain.value = TUNING.audio.tickVolume;
+      src.connect(g);
+      g.connect(this.sfxGain);
+      src.start();
+      return;
+    }
+
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
@@ -147,7 +341,7 @@ export class AudioEngine {
     g.gain.linearRampToValueAtTime(TUNING.audio.tickVolume, t + 0.003);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
     osc.connect(g);
-    g.connect(this.sfxGain!);
+    g.connect(this.sfxGain);
     osc.start(t);
     osc.stop(t + 0.08);
   }
@@ -206,52 +400,26 @@ export class AudioEngine {
     sine.stop(t + 0.2);
   }
 
+  /**
+   * Subtle kill-confirm: a short, bright ping so a felled enemy reads clearly
+   * without the heavy, attention-grabbing thud the old recipe used.
+   */
   private playKill(): void {
-    if (!this.ctx || !this.master || !this.noiseBuffer) return;
+    if (!this.ctx || !this.sfxGain) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
-
-    // Big impact body
-    const noise = ctx.createBufferSource();
-    noise.buffer = this.noiseBuffer;
-    const filt = ctx.createBiquadFilter();
-    filt.type = "lowpass";
-    filt.frequency.setValueAtTime(3000, t);
-    filt.frequency.exponentialRampToValueAtTime(300, t + 0.35);
-    const nG = ctx.createGain();
-    nG.gain.setValueAtTime(TUNING.audio.killVolume * 0.7, t);
-    nG.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-    noise.connect(filt);
-    filt.connect(nG);
-    nG.connect(this.sfxGain!);
-    noise.start(t);
-    noise.stop(t + 0.45);
-
-    // Boomy sine drop
-    const sine = ctx.createOscillator();
-    sine.type = "sine";
-    sine.frequency.setValueAtTime(220, t);
-    sine.frequency.exponentialRampToValueAtTime(50, t + 0.3);
-    const sG = ctx.createGain();
-    sG.gain.setValueAtTime(TUNING.audio.killVolume * 0.6, t);
-    sG.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-    sine.connect(sG);
-    sG.connect(this.sfxGain!);
-    sine.start(t);
-    sine.stop(t + 0.4);
-
-    // High shimmer
-    const sh = ctx.createOscillator();
-    sh.type = "triangle";
-    sh.frequency.setValueAtTime(1320, t);
-    sh.frequency.exponentialRampToValueAtTime(660, t + 0.18);
-    const shG = ctx.createGain();
-    shG.gain.setValueAtTime(TUNING.audio.killVolume * 0.25, t);
-    shG.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
-    sh.connect(shG);
-    shG.connect(this.sfxGain!);
-    sh.start(t);
-    sh.stop(t + 0.22);
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1100, t);
+    osc.frequency.exponentialRampToValueAtTime(1650, t + 0.04);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(TUNING.audio.killVolume, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    osc.connect(g);
+    g.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.13);
   }
 
   private playComboUp(): void {
@@ -330,7 +498,6 @@ export class AudioEngine {
     if (!this.ctx || !this.master || !this.noiseBuffer) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    // Sweeping bass
     const sine = ctx.createOscillator();
     sine.type = "sine";
     sine.frequency.setValueAtTime(60, t);
@@ -344,7 +511,6 @@ export class AudioEngine {
     sg.connect(this.sfxGain!);
     sine.start(t);
     sine.stop(t + 1.0);
-    // Noise tail
     const noise = ctx.createBufferSource();
     noise.buffer = this.noiseBuffer;
     const filt = ctx.createBiquadFilter();
@@ -464,7 +630,86 @@ export class AudioEngine {
     osc.stop(t + 0.12);
   }
 
+  private playPerfect(): void {
+    if (!this.ctx || !this.sfxGain || !this.perfectBuffer) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.perfectBuffer;
+    const g = this.ctx.createGain();
+    g.gain.value = TUNING.audio.perfectVolume;
+    src.connect(g);
+    g.connect(this.sfxGain);
+    src.start();
+  }
+
+  /**
+   * Extra-life flourish: a quick rising arpeggio (C5-E5-G5) so earning a candle
+   * feels rewarding. Placeholder recipe — easy to swap for a sample later.
+   */
+  private playExtraLife(): void {
+    if (!this.ctx || !this.sfxGain) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, i) => {
+      const start = t + i * 0.07;
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, start);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.linearRampToValueAtTime(TUNING.audio.extraLifeVolume, start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+      osc.connect(g);
+      g.connect(this.sfxGain!);
+      osc.start(start);
+      osc.stop(start + 0.24);
+    });
+  }
+
+  private playVictorySong(): void {
+    if (!this.ctx || !this.sfxGain || !this.victorySongBuffer) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.victorySongBuffer;
+    const g = this.ctx.createGain();
+    g.gain.value = TUNING.audio.victorySongVolume;
+    src.connect(g);
+    g.connect(this.sfxGain);
+    src.start();
+  }
+
   // ---------- Internals ----------
+
+  private async loadTickSound(): Promise<void> {
+    if (!this.ctx) return;
+    try {
+      const base = import.meta.env.BASE_URL;
+      const resp = await fetch(`${base}Sounds/Keyboard Typing.mp3`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const arrayBuf = await resp.arrayBuffer();
+      this.tickBuffer = await this.ctx.decodeAudioData(arrayBuf);
+    } catch (e) {
+      console.warn("[Audio] Failed to load tick sound, using fallback", e);
+    }
+  }
+
+  private async loadSampleSound(filename: string): Promise<AudioBuffer | null> {
+    const base = import.meta.env.BASE_URL;
+    return this.loadUrl(`${base}Sounds/${filename}`);
+  }
+
+  /** Fetch + decode an audio file from any URL (built-in path, http, or data URI). */
+  private async loadUrl(src: string): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
+    try {
+      const resp = await fetch(src);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const arrayBuf = await resp.arrayBuffer();
+      return await this.ctx.decodeAudioData(arrayBuf);
+    } catch (e) {
+      console.warn(`[Audio] Failed to load ${src}`, e);
+      return null;
+    }
+  }
 
   private buildNoiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
     const sampleRate = ctx.sampleRate;

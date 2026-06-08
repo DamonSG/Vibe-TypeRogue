@@ -150,6 +150,50 @@ export const WORD_POOLS = {
 export type WordPoolKey = keyof typeof WORD_POOLS;
 
 /**
+ * Prompts for the tiny "glyph" enemy: single mixed-case letters and short
+ * number strings. Matching is case-sensitive, so capitalized letters require
+ * Shift while lowercase do not. Numbers are typed as ordinary characters.
+ */
+export const GLYPH_PROMPTS: readonly string[] = [
+  "a",
+  "B",
+  "c",
+  "D",
+  "e",
+  "f",
+  "G",
+  "h",
+  "j",
+  "K",
+  "m",
+  "n",
+  "P",
+  "q",
+  "r",
+  "S",
+  "t",
+  "u",
+  "W",
+  "x",
+  "Y",
+  "z",
+  "0",
+  "1",
+  "3",
+  "4",
+  "7",
+  "9",
+  "01",
+  "08",
+  "13",
+  "23",
+  "42",
+  "56",
+  "77",
+  "99",
+];
+
+/**
  * Normalize a prompt for typing comparison.
  * Case-preserving: only normalizes smart quotes and whitespace so the matcher
  * compares exactly what the player typed (case included).

@@ -163,8 +163,7 @@ function makeShield(params: GimmickParams): BossGimmick {
         timer = 0;
         let spawned = 0;
         for (let i = 0; i < runeCount; i++) {
-          const laneX = (Math.random() - 0.5) * 1.5;
-          if (ctx.spawnWeakPoint(runeKind, { laneX, depth: 0.9 })) spawned++;
+          if (ctx.spawnWeakPoint(runeKind, { depth: 0.9 })) spawned++;
         }
         if (spawned > 0) setArmor(ctx, true);
       }
@@ -193,8 +192,7 @@ function makeMultiTarget(params: GimmickParams): BossGimmick {
       if (timer < intervalMs) return;
       timer = 0;
       if (ctx.aliveWeakPoints() >= maxAlive) return;
-      const laneX = (Math.random() - 0.5) * 1.6;
-      ctx.spawnWeakPoint(kind, { laneX, depth: 0.95 });
+      ctx.spawnWeakPoint(kind, { depth: 0.95 });
     },
   };
 }

@@ -40,6 +40,12 @@ export class BossSystem {
   private recentWords: string[] = [];
   /** How many recent boss words to remember when avoiding repeats. */
   private static readonly RECENT_WORD_MEMORY = 3;
+  /**
+   * Candidate horizontal lanes for summons/weak points. Deliberately excludes
+   * the center (0.0) where the boss sits, so minions flank it instead of
+   * stacking on top of it.
+   */
+  private static readonly SUMMON_LANES = [-0.75, -0.4, 0.4, 0.75];
   /** Lazily-built context shared with gimmicks. */
   private gimmickCtx: BossGimmickContext | null = null;
 
@@ -200,7 +206,7 @@ export class BossSystem {
         if (aliveMinions < phase.summon.maxAlive) {
           const kinds = phase.summon.kinds;
           const kind = kinds[Math.floor(Math.random() * kinds.length)];
-          const laneX = (Math.random() - 0.5) * 1.4;
+          const laneX = this.pickSummonLane();
           const minion = spawnEnemy(this.state, kind, {
             laneX,
             depth: 0.95,
@@ -211,6 +217,32 @@ export class BossSystem {
         }
       }
     }
+  }
+
+  /**
+   * Choose the flank lane farthest from every currently-alive non-boss enemy so
+   * summoned minions and weak points spread out instead of stacking on the same
+   * column. Falls back to a random lane when no minions are alive.
+   */
+  private pickSummonLane(): number {
+    const taken = this.state.enemies
+      .filter((e) => e.alive && !e.dying && e.def.kind !== "boss")
+      .map((e) => e.laneX);
+    if (taken.length === 0) {
+      return BossSystem.SUMMON_LANES[
+        Math.floor(Math.random() * BossSystem.SUMMON_LANES.length)
+      ];
+    }
+    let bestLane = BossSystem.SUMMON_LANES[0];
+    let bestDist = -Infinity;
+    for (const lane of BossSystem.SUMMON_LANES) {
+      const nearest = Math.min(...taken.map((t) => Math.abs(lane - t)));
+      if (nearest > bestDist) {
+        bestDist = nearest;
+        bestLane = lane;
+      }
+    }
+    return bestLane;
   }
 
   /** Called after boss survives a word completion. Refresh from phase pool. */
@@ -305,7 +337,7 @@ export class BossSystem {
       getPhase: () => this.def.phases[this.currentPhaseIndex],
       spawnWeakPoint: (kind: EnemyKind, opts) => {
         const minion = spawnEnemy(this.state, kind, {
-          laneX: opts?.laneX ?? (Math.random() - 0.5) * 1.5,
+          laneX: opts?.laneX ?? this.pickSummonLane(),
           depth: opts?.depth ?? 0.95,
           promptOverride: opts?.promptOverride,
         });

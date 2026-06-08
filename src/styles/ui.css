@@ -283,6 +283,22 @@ body.mode-forty-words .hud {
 }
 
 /* Boss HP bar */
+/* "Lives" caption above the bottom-left candle row (candles are WebGL-drawn:
+   margin-left 30, margin-bottom 22, candle height 76). */
+.candle-hud-label {
+  position: absolute;
+  left: 30px;
+  bottom: 104px;
+  z-index: 22;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
 .boss-bar {
   position: absolute;
   top: 70px;
@@ -323,22 +339,173 @@ body.mode-forty-words .hud {
   overflow: hidden;
 }
 .boss-bar-fill {
+  position: relative;
+  z-index: 2;
   height: 100%;
   background: linear-gradient(90deg, #4a0a18 0%, #b6314a 50%, #e9385f 100%);
   width: 100%;
   transition: width 320ms ease-out;
   box-shadow: inset 0 0 10px rgba(255, 80, 100, 0.6);
 }
+
+/* Color-coded phase regions behind the fill, aligned to real HP thresholds. */
+.boss-bar-phase-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.boss-bar-phase-zones .zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(74, 10, 24, 0.55);
+  transition: box-shadow 220ms ease-out;
+}
+/* Cool -> hot progression so later (lower-HP) phases read as more dangerous. */
+.boss-bar-phase-zones .zone[data-phase="0"] {
+  background: rgba(74, 10, 24, 0.5);
+}
+.boss-bar-phase-zones .zone[data-phase="1"] {
+  background: rgba(150, 70, 24, 0.5);
+}
+.boss-bar-phase-zones .zone[data-phase="2"] {
+  background: rgba(182, 49, 74, 0.55);
+}
+.boss-bar-phase-zones .zone[data-phase="3"] {
+  background: rgba(214, 40, 70, 0.6);
+}
+.boss-bar-phase-zones .zone.active {
+  box-shadow: inset 0 0 12px rgba(255, 220, 150, 0.65);
+}
+
 .boss-bar-phase-markers {
   position: absolute;
   inset: 0;
-  display: flex;
+  z-index: 3;
   pointer-events: none;
 }
 .boss-bar-phase-markers .marker {
-  flex: 1;
-  border-right: 1px solid rgba(244, 236, 216, 0.35);
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: rgba(244, 236, 216, 0.7);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
 }
-.boss-bar-phase-markers .marker:last-child {
-  border-right: none;
+
+/* Phase-change flash: a quick bright sweep + pop on the HP track. */
+.boss-bar-track.phase-flash {
+  animation: boss-phase-flash 0.7s ease-out;
+}
+@keyframes boss-phase-flash {
+  0% {
+    box-shadow: 0 0 0 rgba(255, 235, 200, 0);
+    filter: brightness(1);
+  }
+  18% {
+    box-shadow: 0 0 22px rgba(255, 235, 200, 0.95);
+    filter: brightness(2.1);
+  }
+  100% {
+    box-shadow: 0 0 0 rgba(255, 235, 200, 0);
+    filter: brightness(1);
+  }
+}
+.boss-bar-phase.swap {
+  animation: boss-phase-swap 0.5s ease-out;
+}
+@keyframes boss-phase-swap {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+    color: var(--accent);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Shielded state: the armor is up and must be broken by clearing the wards. */
+.boss-bar-shield {
+  display: none;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-align: center;
+  color: #8fd0ff;
+  text-shadow: 0 0 10px rgba(120, 190, 255, 0.7);
+  animation: boss-shield-pulse 1.1s ease-in-out infinite;
+}
+.boss-bar.shielded .boss-bar-shield {
+  display: block;
+}
+.boss-bar.shielded .boss-bar-track {
+  border-color: rgba(143, 208, 255, 0.7);
+  box-shadow: 0 0 14px rgba(120, 190, 255, 0.5);
+}
+.boss-bar.shielded .boss-bar-fill {
+  filter: grayscale(0.85) brightness(0.7);
+}
+@keyframes boss-shield-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Dedicated phase-transition banner (distinct from the gold encounter banner). */
+.boss-phase-banner {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-display);
+  font-size: 52px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: #ff6b86;
+  text-shadow:
+    0 0 24px rgba(233, 56, 95, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.8);
+  text-align: center;
+  pointer-events: none;
+  z-index: 31;
+  opacity: 0;
+  animation: boss-phase-banner 1.7s ease-out forwards;
+}
+.boss-phase-banner .banner-name {
+  display: block;
+  font-family: var(--font-game);
+  font-size: 18px;
+  letter-spacing: 5px;
+  color: var(--ink);
+  margin-top: 10px;
+}
+@keyframes boss-phase-banner {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+    filter: blur(6px);
+  }
+  14% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08);
+    filter: blur(0);
+  }
+  26% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.02);
+  }
 }

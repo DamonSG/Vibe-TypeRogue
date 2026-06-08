@@ -144,12 +144,16 @@ function makeShield(params: GimmickParams): BossGimmick {
   const runeCount = Math.max(1, Math.round(num(params, "runeCount", 2)));
   let timer = 0;
   let armorActive = false;
+  const setArmor = (ctx: BossGimmickContext, active: boolean) => {
+    armorActive = active;
+    ctx.state.bossShielded = active;
+  };
   return {
     id: "shield",
     onUpdate: (ctx, deltaMs) => {
       if (armorActive) {
         if (ctx.aliveWeakPoints() === 0) {
-          armorActive = false;
+          setArmor(ctx, false);
           timer = 0;
         }
         return;
@@ -162,12 +166,12 @@ function makeShield(params: GimmickParams): BossGimmick {
           const laneX = (Math.random() - 0.5) * 1.5;
           if (ctx.spawnWeakPoint(runeKind, { laneX, depth: 0.9 })) spawned++;
         }
-        if (spawned > 0) armorActive = true;
+        if (spawned > 0) setArmor(ctx, true);
       }
     },
     modifyBossDamage: (dmg) => (armorActive ? dmg * (1 - reduction) : dmg),
-    onBossDefeated: () => {
-      armorActive = false;
+    onBossDefeated: (ctx) => {
+      setArmor(ctx, false);
     },
   };
 }

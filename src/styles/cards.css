@@ -336,6 +336,74 @@
   letter-spacing: 3px;
 }
 
+/* Boss-linked weak-point ward: a cold, glowing card with a WARD tag so the
+   player knows clearing these breaks the boss's armor. */
+.word-card.ward {
+  border-color: rgba(143, 208, 255, 0.8);
+  background: rgba(8, 20, 32, 0.92);
+  box-shadow:
+    0 0 18px rgba(120, 190, 255, 0.45),
+    inset 0 0 8px rgba(120, 190, 255, 0.2);
+  animation: ward-pulse 1.3s ease-in-out infinite;
+}
+.word-card.ward.targeted {
+  border-color: #bfe6ff;
+  box-shadow:
+    0 0 22px rgba(170, 220, 255, 0.7),
+    inset 0 0 10px rgba(170, 220, 255, 0.3);
+}
+.word-card.ward .ward-tag {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  font-size: 8px;
+  letter-spacing: 2px;
+  font-weight: 700;
+  color: #061018;
+  background: #8fd0ff;
+  border-radius: 3px;
+  text-shadow: none;
+  white-space: nowrap;
+}
+@keyframes ward-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 14px rgba(120, 190, 255, 0.35),
+      inset 0 0 8px rgba(120, 190, 255, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 22px rgba(120, 190, 255, 0.6),
+      inset 0 0 10px rgba(120, 190, 255, 0.3);
+  }
+}
+
+/* SVG layer + tether lines linking the boss to its wards. */
+.ward-tethers {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 14;
+  overflow: visible;
+}
+.ward-tether-line {
+  stroke: rgba(143, 208, 255, 0.55);
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+  filter: drop-shadow(0 0 4px rgba(120, 190, 255, 0.6));
+  animation: ward-tether-flow 0.9s linear infinite;
+}
+@keyframes ward-tether-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
 /* Connector line from card to enemy (subtle) — placed on the side facing the enemy. */
 .word-card::after {
   content: "";

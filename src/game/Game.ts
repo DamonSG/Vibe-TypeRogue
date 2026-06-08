@@ -138,9 +138,7 @@ export class Game {
       onEncounterCleared: (i, def) => this.handleEncounterCleared(i, def),
       onAllEncountersCleared: () => this.handleAllCleared(),
       onBossEncounterStart: (def) => this.handleBossEncounterStart(def),
-      onEnemySpawned: () => {
-        /* nothing required — UI lazily creates card on first frame */
-      },
+      onEnemySpawned: (enemyId) => this.handleEnemySpawned(enemyId),
     });
 
     this.timeAttack = new TimeAttackManager(this.state, {
@@ -292,6 +290,7 @@ export class Game {
     if (this.boss.active && this.boss.getBoss()) {
       const b = this.boss.getBoss()!;
       this.ui.updateBoss(b.hp, b.maxHp, this.boss.getCurrentPhase());
+      this.ui.showBossShielded(this.state.bossShielded);
       // Gimmicks (timed words, scramble) can swap the boss prompt outside the
       // normal complete/survive paths — re-render the card when it changes.
       if (b.promptDisplay !== this.lastBossPromptDisplay) {
@@ -767,8 +766,31 @@ export class Game {
     }
   }
 
+  /**
+   * Apply the chosen boss's identity to the boss enemy the instant it spawns,
+   * before its sprite is ever built — so it appears as its true form from frame
+   * one instead of morphing out of the default Cursed Knight.
+   */
+  private handleEnemySpawned(enemyId: string): void {
+    const enemy = this.state.enemies.find((e) => e.id === enemyId);
+    if (!enemy || enemy.def.kind !== "boss") return;
+    const def = this.boss.getDef();
+    enemy.def = { ...enemy.def };
+    enemy.def.displayName = def.displayName;
+    enemy.def.spriteKey = def.spriteKey;
+    enemy.def.scale = def.scale;
+    if (def.colorHint) {
+      enemy.def.colorHint = def.colorHint;
+      enemy.colorHint = def.colorHint;
+    }
+    this.enemyView.refreshSprite(enemy.id);
+  }
+
   private handleBossEncounterStart(_def: EncounterDef): void {
     this.bossEncounterStarted = true;
+    // Choose the boss now (before it spawns) so its visuals can be applied at
+    // spawn time; binding (HP, bar, prompt) still happens after the entrance.
+    this.boss.prepareBoss();
     this.scheduleGameplayTimeout(() => {
       if (this.state.mode === "title") return;
       const scale =
@@ -778,10 +800,10 @@ export class Game {
       this.boss.bindBoss(scale);
       const boss = this.boss.getBoss();
       if (boss) {
-        // Adopt the selected boss's sprite/color (def may differ per fight).
-        this.enemyView.refreshSprite(boss.id);
+        // Visuals were already applied at spawn (handleEnemySpawned), so the
+        // boss does not morph here — we only reveal its bar and word.
         this.lastBossPromptDisplay = boss.promptDisplay;
-        this.ui.showBossBar(boss.def.displayName, this.boss.totalPhases());
+        this.ui.showBossBar(boss.def.displayName, this.boss.getDef().phases);
         this.ui.updateBoss(boss.hp, boss.maxHp, this.boss.getCurrentPhase());
         this.ui.refreshCardPrompt(boss.id, boss.promptDisplay);
         this.audio.play("phaseChange");
@@ -795,7 +817,7 @@ export class Game {
     // Refresh boss card visually
     const boss = this.boss.getBoss();
     if (boss) this.ui.refreshCardPrompt(boss.id, boss.promptDisplay);
-    this.ui.showEncounterBanner(`Phase ${phase.index + 1}`, phase.name, true);
+    this.ui.flashPhaseChange(phase);
   }
 
   private handleBossDefeated(): void {

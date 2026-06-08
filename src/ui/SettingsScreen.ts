@@ -160,40 +160,19 @@ export class SettingsScreen {
 
     wrap.innerHTML = `
       <div class="music-add-label">Add your own music${atCap ? " (limit reached)" : ""}</div>
-      <div class="music-add-url">
-        <input type="text" class="music-url-input" placeholder="Paste an audio URL" ${atCap ? "disabled" : ""} />
-        <button type="button" class="music-add-btn" data-add-url ${atCap ? "disabled" : ""}>Add</button>
-      </div>
       <label class="music-file-btn ${atCap ? "disabled" : ""}">
-        Upload file
-        <input type="file" accept="audio/*" class="music-file-input" ${atCap ? "disabled" : ""} hidden />
+        Upload audio file (MP3, WAV, OGG…)
+        <input type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" class="music-file-input" ${atCap ? "disabled" : ""} hidden />
       </label>
       <div class="music-add-error" data-add-error></div>
     `;
 
-    const urlInput = wrap.querySelector<HTMLInputElement>(".music-url-input")!;
-    const addBtn = wrap.querySelector<HTMLButtonElement>("[data-add-url]")!;
     const fileInput = wrap.querySelector<HTMLInputElement>(".music-file-input")!;
     const errEl = wrap.querySelector<HTMLElement>("[data-add-error]")!;
 
     const showError = (msg: string): void => {
       errEl.textContent = msg;
     };
-
-    addBtn.addEventListener("click", () => {
-      const url = urlInput.value.trim();
-      if (!url) {
-        showError("Enter a URL first.");
-        return;
-      }
-      const name = deriveName(url);
-      if (!this.store.addCustomTrack(name, url)) {
-        showError(`Limit of ${MAX_CUSTOM_TRACKS} custom tracks reached.`);
-        return;
-      }
-      this.onUiSound?.();
-      this.renderCustomList(container);
-    });
 
     fileInput.addEventListener("change", () => {
       const file = fileInput.files?.[0];
@@ -229,17 +208,6 @@ export class SettingsScreen {
     }
     this.onBack = null;
   }
-}
-
-function deriveName(url: string): string {
-  try {
-    const u = new URL(url, window.location.href);
-    const last = u.pathname.split("/").filter(Boolean).pop();
-    if (last) return stripExtension(decodeURIComponent(last));
-  } catch {
-    /* fall through */
-  }
-  return "Custom Track";
 }
 
 function stripExtension(name: string): string {

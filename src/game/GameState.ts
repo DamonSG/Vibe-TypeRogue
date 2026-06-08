@@ -82,6 +82,12 @@ export class GameState implements GameStateSnapshot {
    */
   bossDamageModifier?: (dmg: number) => number;
 
+  /**
+   * True while the active boss has armor raised (its weak-point wards must be
+   * cleared to break it). Drives the "SHIELDED" boss-bar indicator.
+   */
+  bossShielded: boolean = false;
+
   /** Reset everything for a fresh run. */
   reset(): void {
     this.hp = TUNING.player.maxHp;
@@ -117,6 +123,7 @@ export class GameState implements GameStateSnapshot {
     this.enemies = [];
     this.lastWordAt = 0;
     this.bossDamageModifier = undefined;
+    this.bossShielded = false;
   }
 
   /** Elapsed run time in ms (time-attack uses its own start/stop clock). */

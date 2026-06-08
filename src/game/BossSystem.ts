@@ -1,6 +1,7 @@
 import type { BossDef, BossPhaseDef, Enemy, EnemyKind } from "../types";
 import { BOSS_REGISTRY } from "../data/bosses";
-import { GameState, spawnEnemy, setEnemyPrompt, pickFreshPrompt } from "./GameState";
+import { GameState, spawnEnemy, setEnemyPrompt } from "./GameState";
+import { normalizePrompt, pickPrompt } from "../data/words";
 import {
   createGimmick,
   type BossGimmick,
@@ -33,6 +34,12 @@ export class BossSystem {
   private phaseGimmicks: BossGimmick[] = [];
   /** Ids of bosses already used this run (for no-repeat random selection). */
   private usedBossIds = new Set<string>();
+  /** True once a boss def has been chosen for the upcoming fight. */
+  private prepared = false;
+  /** Recently used boss words (display form) to avoid back-to-back repeats. */
+  private recentWords: string[] = [];
+  /** How many recent boss words to remember when avoiding repeats. */
+  private static readonly RECENT_WORD_MEMORY = 3;
   /** Lazily-built context shared with gimmicks. */
   private gimmickCtx: BossGimmickContext | null = null;
 
@@ -54,10 +61,23 @@ export class BossSystem {
     this.summonTimer = 0;
     this.scale = 1;
     this.active = false;
+    this.prepared = false;
+    this.recentWords = [];
     this.bossGimmicks = [];
     this.phaseGimmicks = [];
     this.gimmickCtx = null;
     this.state.bossDamageModifier = undefined;
+    this.state.bossShielded = false;
+  }
+
+  /**
+   * Choose the boss def for the upcoming fight. Called before the boss enemy
+   * spawns so its sprite/scale/color can be applied at spawn time (no morph).
+   */
+  prepareBoss(): BossDef {
+    this.def = this.selectBoss();
+    this.prepared = true;
+    return this.def;
   }
 
   /**
@@ -84,7 +104,9 @@ export class BossSystem {
   bindBoss(scale = 1): void {
     const boss = this.state.enemies.find((e) => e.def.kind === "boss" && e.alive);
     if (!boss) return;
-    this.def = this.selectBoss();
+    // Selection normally happens in prepareBoss() before the boss spawns; fall
+    // back to selecting here if something skipped the prepare step.
+    if (!this.prepared) this.def = this.selectBoss();
     this.bossEnemy = boss;
     this.currentPhaseIndex = 0;
     this.summonTimer = 0;
@@ -110,7 +132,7 @@ export class BossSystem {
     // Apply phase 0 cadence + prompts
     boss.def.attackTimerMs = phase0.attackTimerMs;
     boss.def.damage = Math.round(phase0.damage * this.scale);
-    setEnemyPrompt(boss, pickFreshPrompt(phase0.promptPool));
+    setEnemyPrompt(boss, this.pickBossPrompt(phase0.promptPool));
 
     // Build gimmicks + wire the damage modifier.
     this.gimmickCtx = this.buildContext(boss);
@@ -131,6 +153,7 @@ export class BossSystem {
       const ctx = this.gimmickCtx;
       if (ctx) for (const g of this.allGimmicks()) g.onBossDefeated?.(ctx);
       this.state.bossDamageModifier = undefined;
+      this.state.bossShielded = false;
       this.cbs.onBossDefeated();
       return;
     }
@@ -148,7 +171,7 @@ export class BossSystem {
       boss.def.damage = Math.round(newPhase.damage * this.scale);
       this.summonTimer = 0;
       // Set new prompt from phase pool
-      setEnemyPrompt(boss, pickFreshPrompt(newPhase.promptPool));
+      setEnemyPrompt(boss, this.pickBossPrompt(newPhase.promptPool));
       // Swap in this phase's gimmicks and notify everyone of the transition.
       this.phaseGimmicks = this.instantiate(newPhase.gimmicks);
       if (this.gimmickCtx) {
@@ -194,10 +217,7 @@ export class BossSystem {
   refreshBossPrompt(): void {
     if (!this.bossEnemy || !this.active) return;
     const phase = this.def.phases[this.currentPhaseIndex];
-    setEnemyPrompt(
-      this.bossEnemy,
-      pickFreshPrompt(phase.promptPool, this.bossEnemy.promptDisplay),
-    );
+    setEnemyPrompt(this.bossEnemy, this.pickBossPrompt(phase.promptPool));
   }
 
   /** Notify gimmicks that the player completed the boss's word. */
@@ -230,6 +250,30 @@ export class BossSystem {
 
   private allGimmicks(): BossGimmick[] {
     return [...this.bossGimmicks, ...this.phaseGimmicks];
+  }
+
+  /**
+   * Pick the boss's next word, avoiding its current word, the last few boss
+   * words, and any word currently shown by an alive enemy (minions / wards).
+   * Records the choice in the recent-word history so repeats stay rare even
+   * with the small per-phase pools.
+   */
+  private pickBossPrompt(pool: readonly string[]): string {
+    const avoid = new Set<string>();
+    if (this.bossEnemy) avoid.add(normalizePrompt(this.bossEnemy.promptDisplay));
+    for (const w of this.recentWords) avoid.add(normalizePrompt(w));
+    for (const e of this.state.enemies) {
+      if (e.alive && e !== this.bossEnemy) {
+        avoid.add(normalizePrompt(e.promptDisplay));
+      }
+    }
+    const fresh = pool.filter((p) => !avoid.has(normalizePrompt(p)));
+    const pick = fresh.length > 0 ? pickPrompt(fresh) : pickPrompt(pool);
+    this.recentWords.push(pick);
+    if (this.recentWords.length > BossSystem.RECENT_WORD_MEMORY) {
+      this.recentWords.shift();
+    }
+    return pick;
   }
 
   private instantiate(

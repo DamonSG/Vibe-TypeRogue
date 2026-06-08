@@ -82,6 +82,8 @@ export class UI {
   private bossPhaseEl: HTMLElement;
   // Cards
   private cards = new Map<string, EnemyCardEl>();
+  // SVG layer for ward tether lines (drawn behind the word cards).
+  private tetherSvg: SVGSVGElement;
 
   constructor() {
     const r = document.getElementById("ui-root");
@@ -105,6 +107,12 @@ export class UI {
     this.cardsRoot.className = "cards-root";
     this.cardsRoot.style.cssText =
       "position:absolute;inset:0;pointer-events:none;";
+    this.tetherSvg = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg",
+    );
+    this.tetherSvg.setAttribute("class", "ward-tethers");
+    this.cardsRoot.appendChild(this.tetherSvg);
     this.root.appendChild(this.cardsRoot);
   }
 
@@ -229,6 +237,8 @@ export class UI {
           width: card.el.offsetWidth,
           height: card.el.offsetHeight,
           anchorTop: e.cardAnchorSide === "top",
+          isBoss: e.def.kind === "boss",
+          isWard: e.bossLinked === true,
         });
       }
       // Target highlight
@@ -255,6 +265,7 @@ export class UI {
       }
     }
     this.resolveCardOverlap(layouts);
+    this.drawWardTethers(layouts);
     // Remove cards for enemies that no longer exist
     for (const [id, card] of this.cards) {
       if (!seen.has(id)) {
@@ -294,6 +305,30 @@ export class UI {
     }
     for (const l of layouts) {
       l.card.el.style.left = `${l.x}px`;
+    }
+  }
+
+  /**
+   * Draw a line from the boss card to each alive ward card so the player can
+   * see the wards are boss-linked (clearing them breaks its armor). Rebuilt
+   * each frame from the final, overlap-resolved card positions.
+   */
+  private drawWardTethers(layouts: CardLayout[]): void {
+    while (this.tetherSvg.firstChild) {
+      this.tetherSvg.removeChild(this.tetherSvg.firstChild);
+    }
+    const boss = layouts.find((l) => l.isBoss);
+    const wards = layouts.filter((l) => l.isWard);
+    if (!boss || wards.length === 0) return;
+    const ns = "http://www.w3.org/2000/svg";
+    for (const w of wards) {
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", String(boss.x));
+      line.setAttribute("y1", String(boss.top));
+      line.setAttribute("x2", String(w.x));
+      line.setAttribute("y2", String(w.top));
+      line.setAttribute("class", "ward-tether-line");
+      this.tetherSvg.appendChild(line);
     }
   }
 
@@ -365,24 +400,48 @@ export class UI {
 
   // ---------- Boss bar ----------
 
-  showBossBar(name: string, totalPhases: number): void {
+  showBossBar(name: string, phases: readonly BossPhaseDef[]): void {
     this.bossBar.classList.add("visible");
     this.bossBarLabel.textContent = name;
-    // Build phase markers
+    this.buildPhaseSegments(phases);
+    this.bossBarFill.style.width = "100%";
+  }
+
+  /**
+   * Build the color-coded phase zones + threshold-aligned boundary markers from
+   * the boss's real HP thresholds (endsAtHpFraction). The track fills from the
+   * left, so an HP fraction f maps to x = f * 100%: a phase that ends at 0.7
+   * sits at the 70% line, exactly where the shrinking fill crosses into it.
+   */
+  private buildPhaseSegments(phases: readonly BossPhaseDef[]): void {
+    const zones = this.bossBar.querySelector(".boss-bar-phase-zones");
     const markers = this.bossBar.querySelector(".boss-bar-phase-markers");
-    if (markers) {
-      markers.innerHTML = "";
-      for (let i = 0; i < totalPhases; i++) {
+    if (zones) zones.innerHTML = "";
+    if (markers) markers.innerHTML = "";
+    for (let i = 0; i < phases.length; i++) {
+      const startFraction = i === 0 ? 1 : phases[i - 1].endsAtHpFraction;
+      const endFraction = phases[i].endsAtHpFraction;
+      if (zones) {
+        const zone = document.createElement("div");
+        zone.className = "zone";
+        zone.dataset.phase = String(i);
+        zone.style.left = `${endFraction * 100}%`;
+        zone.style.width = `${(startFraction - endFraction) * 100}%`;
+        zones.appendChild(zone);
+      }
+      // A boundary line sits where this phase ends (skip the final 0% edge).
+      if (markers && endFraction > 0) {
         const m = document.createElement("div");
         m.className = "marker";
+        m.style.left = `${endFraction * 100}%`;
         markers.appendChild(m);
       }
     }
-    this.bossBarFill.style.width = "100%";
   }
 
   hideBossBar(): void {
     this.bossBar.classList.remove("visible");
+    this.bossBar.classList.remove("shielded");
   }
 
   updateBoss(hp: number, maxHp: number, phase: BossPhaseDef | null): void {
@@ -391,7 +450,43 @@ export class UI {
     this.bossBarFill.style.width = `${pct * 100}%`;
     if (phase) {
       this.bossPhaseEl.textContent = `Phase ${phase.index + 1} — ${phase.name}`;
+      const zones = this.bossBar.querySelectorAll<HTMLElement>(
+        ".boss-bar-phase-zones .zone",
+      );
+      zones.forEach((z) => {
+        z.classList.toggle("active", z.dataset.phase === String(phase.index));
+      });
     }
+  }
+
+  /** Toggle the "SHIELDED" indicator + greyed bar while the boss armor is up. */
+  showBossShielded(active: boolean): void {
+    this.bossBar.classList.toggle("shielded", active);
+  }
+
+  /**
+   * Mark a phase transition as a major beat: flash the HP track, re-trigger the
+   * phase-label swap animation, and pop a dedicated boss-phase banner. Scoped to
+   * the boss bar styling (distinct from the generic encounter banner).
+   */
+  flashPhaseChange(phase: BossPhaseDef): void {
+    const track = this.bossBar.querySelector<HTMLElement>(".boss-bar-track");
+    if (track) {
+      track.classList.remove("phase-flash");
+      void track.offsetWidth;
+      track.classList.add("phase-flash");
+      window.setTimeout(() => track.classList.remove("phase-flash"), 720);
+    }
+    this.bossPhaseEl.textContent = `Phase ${phase.index + 1} — ${phase.name}`;
+    this.bossPhaseEl.classList.remove("swap");
+    void this.bossPhaseEl.offsetWidth;
+    this.bossPhaseEl.classList.add("swap");
+
+    const banner = document.createElement("div");
+    banner.className = "boss-phase-banner";
+    banner.innerHTML = `Phase ${phase.index + 1}<span class="banner-name">${phase.name}</span>`;
+    this.root.appendChild(banner);
+    window.setTimeout(() => banner.remove(), 1700);
   }
 
   // ---------- Title screen ----------
@@ -677,15 +772,18 @@ export class UI {
     fill: HTMLElement;
     label: HTMLElement;
     phase: HTMLElement;
+    shield: HTMLElement;
   } {
     const bar = document.createElement("div");
     bar.className = "boss-bar";
     bar.innerHTML = `
       <div class="boss-bar-label">The Cursed Knight</div>
       <div class="boss-bar-track">
+        <div class="boss-bar-phase-zones"></div>
         <div class="boss-bar-fill"></div>
         <div class="boss-bar-phase-markers"></div>
       </div>
+      <div class="boss-bar-shield">SHIELDED — break the wards</div>
       <div class="boss-bar-phase">Phase 1</div>
     `;
     this.root.appendChild(bar);
@@ -694,6 +792,7 @@ export class UI {
       fill: bar.querySelector(".boss-bar-fill") as HTMLElement,
       label: bar.querySelector(".boss-bar-label") as HTMLElement,
       phase: bar.querySelector(".boss-bar-phase") as HTMLElement,
+      shield: bar.querySelector(".boss-bar-shield") as HTMLElement,
     };
   }
 
@@ -706,6 +805,15 @@ export class UI {
     if (enemy.cardStyle === "phrase") el.classList.add("phrase");
     if (enemy.cardStyle === "elite") el.classList.add("elite");
     if (enemy.cardStyle === "boss") el.classList.add("boss");
+    // Boss-linked weak points read as wards: distinct accent + a WARD label so
+    // the player knows clearing them breaks the boss's armor.
+    if (enemy.bossLinked) {
+      el.classList.add("ward");
+      const tag = document.createElement("div");
+      tag.className = "ward-tag";
+      tag.textContent = "WARD";
+      el.appendChild(tag);
+    }
     const prompt = document.createElement("div");
     prompt.className = "prompt";
     const letters: HTMLElement[] = [];
@@ -791,6 +899,10 @@ interface CardLayout {
   height: number;
   /** True when the card sits above its anchor (translate -100%). */
   anchorTop: boolean;
+  /** True when this layout belongs to the boss enemy. */
+  isBoss: boolean;
+  /** True when this layout belongs to a boss-linked weak-point ward. */
+  isWard: boolean;
 }
 
 /** Whether two cards' vertical extents intersect (anchor-aware). */

@@ -43,12 +43,15 @@ export class CandleHud {
   private litCandles = 0;
   private visible = false;
   private glowTexture: THREE.CanvasTexture;
+  /** DOM "Lives" label anchored above the candle row (WebGL can't draw text). */
+  private label: HTMLElement;
 
   constructor() {
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
     this.camera.position.z = 1;
     this.glowTexture = buildGlowTexture();
+    this.label = this.buildLabel();
 
     new THREE.TextureLoader().load(candleSheetUrl, (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
@@ -66,11 +69,13 @@ export class CandleHud {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+    this.label.style.display = visible ? "block" : "none";
   }
 
   clear(): void {
     this.visible = false;
     this.litCandles = 0;
+    this.label.style.display = "none";
   }
 
   update(deltaMs: number, lit: number, max: number): void {
@@ -110,9 +115,21 @@ export class CandleHud {
     this.disposeCandles();
     this.glowTexture.dispose();
     this.baseTexture?.dispose();
+    this.label.remove();
   }
 
   // ---------- Internals ----------
+
+  /** Build the bottom-left "Lives" caption sitting above the candle row. */
+  private buildLabel(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "candle-hud-label";
+    el.textContent = "Lives";
+    el.style.display = "none";
+    const host = document.getElementById("ui-root") ?? document.body;
+    host.appendChild(el);
+    return el;
+  }
 
   private rebuild(max: number): void {
     this.disposeCandles();
